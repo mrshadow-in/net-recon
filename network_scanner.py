@@ -7,7 +7,9 @@ import subprocess
 import platform
 import struct
 import json
-from typing import List, Dict, Tuple, Set, Optional
+import urllib.request
+import urllib.error
+from typing import List, Dict, Tuple, Set, Optional, Any, Union
 from concurrent.futures import ThreadPoolExecutor
 import time
 
@@ -143,9 +145,59 @@ def scan_with_progress(ip_list: List[str], method: str = 'ping', max_workers: in
     return results
 
 
-def check_minecraft_server(ip: str, port: int, timeout: float = 1.0) -> bool:
+def check_minecraft_server_api(ip: str, port: int = None, timeout: float = 5.0) -> Dict[str, Any]:
+    """
+    Check if a specific IP and port is a Minecraft server using the mcsrvstat.us API.
+    
+    Args:
+        ip: IP address or hostname to check
+        port: Port to check (optional, the API will find it if not specified)
+        timeout: Timeout in seconds for the API request
+        
+    Returns:
+        Dict[str, Any]: Dictionary with server information, including 'online' status
+    """
+    # Construct the API URL
+    base_url = "https://api.mcsrvstat.us/3/"
+    if port is not None:
+        address = f"{ip}:{port}"
+    else:
+        address = ip
+    
+    url = base_url + address
+    
+    # Set up the request with a proper User-Agent
+    headers = {
+        "User-Agent": "ROCON-Scanner/1.0 (https://github.com/yourusername/rocon-ip-scanner)"
+    }
+    
+    try:
+        # Create a request object with headers
+        req = urllib.request.Request(url, headers=headers)
+        
+        # Open the URL with timeout
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            # Parse the JSON response
+            data = json.loads(response.read().decode('utf-8'))
+            return data
+    except urllib.error.HTTPError as e:
+        # Handle HTTP errors (e.g., 403 Forbidden)
+        return {"online": False, "error": f"HTTP Error: {e.code} {e.reason}"}
+    except urllib.error.URLError as e:
+        # Handle URL errors (e.g., connection timeout)
+        return {"online": False, "error": f"URL Error: {e.reason}"}
+    except json.JSONDecodeError:
+        # Handle invalid JSON response
+        return {"online": False, "error": "Invalid JSON response from API"}
+    except Exception as e:
+        # Handle any other exceptions
+        return {"online": False, "error": f"Error: {str(e)}"}
+
+
+def check_minecraft_server(ip: str, port: int, timeout: float = 1.0) -> Union[bool, Dict[str, Any]]:
     """
     Check if a specific IP and port is a Minecraft server.
+    Uses the mcsrvstat.us API for reliable detection.
     
     Args:
         ip: IP address to check
@@ -153,94 +205,33 @@ def check_minecraft_server(ip: str, port: int, timeout: float = 1.0) -> bool:
         timeout: Timeout in seconds
         
     Returns:
-        bool: True if a Minecraft server is detected, False otherwise
+        Union[bool, Dict[str, Any]]: True/False for backward compatibility or server info dictionary
     """
+    # First check if the port is open using a quick socket connection
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     
     try:
-        # First check if the port is open
         result = sock.connect_ex((ip, port))
         if result != 0:
             return False
-        
-        # Send handshake packet
-        # Protocol version: -1 (ping)
-        # Server address: ip
-        # Server port: port
-        # Next state: 1 (status)
-        packet_id = 0x00  # Handshake packet ID
-        protocol_version = -1
-        server_address = ip
-        server_port = port
-        next_state = 1
-        
-        # Construct the packet
-        packet = bytearray()
-        packet.append(packet_id)
-        
-        # Add protocol version (VarInt)
-        val = protocol_version
-        while True:
-            temp = val & 0x7F
-            val >>= 7
-            if val != 0:
-                temp |= 0x80
-            packet.append(temp)
-            if val == 0:
-                break
-        
-        # Add server address (String)
-        packet.extend(len(server_address).to_bytes(1, byteorder='big'))
-        packet.extend(server_address.encode('utf-8'))
-        
-        # Add server port (Unsigned Short)
-        packet.extend(server_port.to_bytes(2, byteorder='big'))
-        
-        # Add next state (VarInt)
-        val = next_state
-        while True:
-            temp = val & 0x7F
-            val >>= 7
-            if val != 0:
-                temp |= 0x80
-            packet.append(temp)
-            if val == 0:
-                break
-        
-        # Prepend packet length
-        packet_length = len(packet)
-        length_bytes = bytearray()
-        val = packet_length
-        while True:
-            temp = val & 0x7F
-            val >>= 7
-            if val != 0:
-                temp |= 0x80
-            length_bytes.append(temp)
-            if val == 0:
-                break
-        
-        # Send the handshake packet
-        sock.sendall(length_bytes + packet)
-        
-        # Send status request packet
-        status_packet = bytearray([0x01, 0x00])
-        sock.sendall(status_packet)
-        
-        # Receive response
-        response = sock.recv(1024)
-        
-        # If we got a response, it's likely a Minecraft server
-        return len(response) > 0
     except Exception:
         return False
     finally:
         sock.close()
+    
+    # If the port is open, use the API to check if it's a Minecraft server
+    server_info = check_minecraft_server_api(ip, port, timeout=timeout)
+    
+    # For backward compatibility, return True if the server is online
+    if isinstance(server_info, dict) and server_info.get("online", False):
+        return server_info
+    
+    return False
 
 
 def scan_minecraft_ports(ip: str, port_range: Tuple[int, int] = (2048, 30000), max_workers: int = 50, timeout: float = 0.5, 
-                  progress_callback=None) -> List[int]:
+                  progress_callback=None) -> Dict[int, Dict[str, Any]]:
     """
     Scan a range of ports on a single IP for Minecraft servers.
     
@@ -253,12 +244,12 @@ def scan_minecraft_ports(ip: str, port_range: Tuple[int, int] = (2048, 30000), m
                           Called with (current_port, ports_completed, total_ports)
         
     Returns:
-        List[int]: List of ports where Minecraft servers were detected
+        Dict[int, Dict[str, Any]]: Dictionary mapping ports to server information
     """
     start_port, end_port = port_range
     ports = list(range(start_port, end_port + 1))
     total_ports = len(ports)
-    minecraft_ports = []
+    minecraft_servers = {}
     completed_ports = 0
     
     # If we have a callback, initialize with 0 progress
@@ -273,8 +264,14 @@ def scan_minecraft_ports(ip: str, port_range: Tuple[int, int] = (2048, 30000), m
         for future in futures:
             port = futures[future]
             try:
-                if future.result():
-                    minecraft_ports.append(port)
+                result = future.result()
+                if result:
+                    if isinstance(result, dict):
+                        # Store the full server info
+                        minecraft_servers[port] = result
+                    else:
+                        # For backward compatibility if result is just True
+                        minecraft_servers[port] = {"online": True}
             except Exception:
                 pass
             
@@ -283,10 +280,10 @@ def scan_minecraft_ports(ip: str, port_range: Tuple[int, int] = (2048, 30000), m
             if progress_callback:
                 progress_callback(port, completed_ports, total_ports)
     
-    return minecraft_ports
+    return minecraft_servers
 
 
-def scan_minecraft_servers(ip_list: List[str], port_range: Tuple[int, int] = (2048, 30000), max_workers: int = 50, timeout: float = 0.5) -> Dict[str, List[int]]:
+def scan_minecraft_servers(ip_list: List[str], port_range: Tuple[int, int] = (2048, 30000), max_workers: int = 50, timeout: float = 0.5) -> Dict[str, Dict[int, Dict[str, Any]]]:
     """
     Scan multiple IPs for Minecraft servers.
     
@@ -297,14 +294,14 @@ def scan_minecraft_servers(ip_list: List[str], port_range: Tuple[int, int] = (20
         timeout: Timeout in seconds for each port check
         
     Returns:
-        Dict[str, List[int]]: Dictionary mapping IP addresses to lists of ports where Minecraft servers were detected
+        Dict[str, Dict[int, Dict[str, Any]]]: Dictionary mapping IP addresses to dictionaries of port->server info
     """
     results = {}
     
     for ip in ip_list:
-        minecraft_ports = scan_minecraft_ports(ip, port_range, max_workers, timeout)
-        if minecraft_ports:
-            results[ip] = minecraft_ports
+        minecraft_servers = scan_minecraft_ports(ip, port_range, max_workers, timeout)
+        if minecraft_servers:
+            results[ip] = minecraft_servers
     
     return results
 
@@ -353,10 +350,11 @@ def format_time(seconds: float) -> str:
     return f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
 
 
-def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[int, int] = (2048, 30000), max_workers: int = 50, timeout: float = 0.5) -> Dict[str, List[int]]:
+def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[int, int] = (2048, 30000), max_workers: int = 50, timeout: float = 0.5) -> Dict[str, Dict[int, Dict[str, Any]]]:
     """
     Scan multiple IPs for Minecraft servers with beautified live progress reporting.
     Shows progress bars for both IP scanning and port scanning of the current IP.
+    Uses the mcsrvstat.us API for reliable Minecraft server detection.
     
     Args:
         ip_list: List of IP addresses to scan
@@ -365,7 +363,7 @@ def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[i
         timeout: Timeout in seconds for each port check
         
     Returns:
-        Dict[str, List[int]]: Dictionary mapping IP addresses to lists of ports where Minecraft servers were detected
+        Dict[str, Dict[int, Dict[str, Any]]]: Dictionary mapping IP addresses to dictionaries of port->server info
     """
     # ANSI color codes
     GREEN = '\033[92m'
@@ -487,16 +485,30 @@ def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[i
         )
         
         # Scan the IP for Minecraft servers with progress reporting
-        minecraft_ports = scan_minecraft_ports(
+        minecraft_servers = scan_minecraft_ports(
             ip, port_range, max_workers, timeout, 
             progress_callback=port_progress_callback
         )
         
         # Update results
-        if minecraft_ports:
-            results[ip] = minecraft_ports
+        if minecraft_servers:
+            results[ip] = minecraft_servers
             found_servers += 1
-            status = f"Found Minecraft servers at ports: {', '.join(map(str, minecraft_ports))}"
+            
+            # Format server information for display
+            server_info = []
+            for port, server_data in minecraft_servers.items():
+                if isinstance(server_data, dict) and server_data.get("online", False):
+                    # Extract useful information if available
+                    version = server_data.get("version", "Unknown")
+                    players = server_data.get("players", {})
+                    player_count = f"{players.get('online', '?')}/{players.get('max', '?')}" if isinstance(players, dict) else "?"
+                    
+                    server_info.append(f"{port} (v:{version}, players:{player_count})")
+                else:
+                    server_info.append(f"{port}")
+            
+            status = f"Found Minecraft servers at ports: {', '.join(server_info)}"
         else:
             status = "No Minecraft servers found"
         
@@ -521,9 +533,38 @@ def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[i
     print(f"{CYAN}• Total Time:{RESET} {format_time(total_time)}")
     print(f"{CYAN}• IPs Scanned:{RESET} {total_ips}")
     print(f"{CYAN}• Minecraft Servers Found:{RESET} {found_servers}")
+    
     if found_servers > 0:
         print(f"\n{GREEN}Minecraft Servers:{RESET}")
-        for ip, ports in results.items():
-            print(f"  {BOLD}{ip}:{RESET} {', '.join(map(str, ports))}")
+        for ip, servers in results.items():
+            print(f"  {BOLD}{ip}:{RESET}")
+            for port, server_data in servers.items():
+                if isinstance(server_data, dict) and server_data.get("online", False):
+                    # Extract and display detailed server information
+                    version = server_data.get("version", "Unknown")
+                    motd = server_data.get("motd", {})
+                    motd_text = motd.get("clean", ["No MOTD"])[0] if isinstance(motd, dict) and "clean" in motd and motd["clean"] else "No MOTD"
+                    
+                    players = server_data.get("players", {})
+                    if isinstance(players, dict):
+                        player_count = f"{players.get('online', '?')}/{players.get('max', '?')}"
+                        player_list = players.get("list", [])
+                        player_sample = ", ".join([p.get("name", "?") for p in player_list[:3]]) if player_list else "None"
+                        if len(player_list) > 3:
+                            player_sample += f" and {len(player_list) - 3} more"
+                    else:
+                        player_count = "?"
+                        player_sample = "None"
+                    
+                    software = server_data.get("software", "Unknown")
+                    
+                    print(f"    {YELLOW}Port {port}:{RESET}")
+                    print(f"      {CYAN}Version:{RESET} {version}")
+                    print(f"      {CYAN}MOTD:{RESET} {motd_text}")
+                    print(f"      {CYAN}Players:{RESET} {player_count} online ({player_sample})")
+                    print(f"      {CYAN}Software:{RESET} {software}")
+                else:
+                    # Minimal information for servers without detailed data
+                    print(f"    {YELLOW}Port {port}:{RESET} Minecraft server detected")
     
     return results

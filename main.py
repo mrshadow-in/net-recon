@@ -130,13 +130,13 @@ def get_user_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optio
     return start_ip, end_ip, subnet, test_name
 
 
-def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], int, Optional[str]]:
+def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], Optional[str]]:
     """
     Get input for Minecraft server scanning.
     
     Returns:
-        Tuple[Optional[str], Optional[str], Optional[str], int, Optional[str]]: 
-            (start_ip, end_ip, subnet, threads, test_name)
+        Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], Optional[str]]: 
+            (start_ip, end_ip, subnet, threads, port_range, test_name)
     """
     print("\nROCON Minecraft Scanner - Interactive Mode")
     print("=========================================")
@@ -170,9 +170,43 @@ def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[s
             print(f"Error: Invalid subnet: {subnet}")
             subnet = None
     
+    # Get port range
+    default_start_port = 2048
+    default_end_port = 30000
+    print(f"\nEnter port range to scan (default: {default_start_port}-{default_end_port}):")
+    
+    # Get start port
+    start_port = default_start_port
+    start_port_input = input(f"Start port (default: {default_start_port}): ").strip()
+    if start_port_input:
+        try:
+            start_port = int(start_port_input)
+            if start_port < 1 or start_port > 65535:
+                print(f"Start port must be between 1 and 65535. Using default value: {default_start_port}.")
+                start_port = default_start_port
+        except ValueError:
+            print(f"Invalid start port. Using default value: {default_start_port}.")
+    
+    # Get end port
+    end_port = default_end_port
+    end_port_input = input(f"End port (default: {default_end_port}): ").strip()
+    if end_port_input:
+        try:
+            end_port = int(end_port_input)
+            if end_port < 1 or end_port > 65535:
+                print(f"End port must be between 1 and 65535. Using default value: {default_end_port}.")
+                end_port = default_end_port
+        except ValueError:
+            print(f"Invalid end port. Using default value: {default_end_port}.")
+    
+    # Ensure start_port <= end_port
+    if start_port > end_port:
+        print(f"Start port ({start_port}) is greater than end port ({end_port}). Swapping values.")
+        start_port, end_port = end_port, start_port
+    
     # Get number of threads
     threads = 50  # Default value
-    threads_input = input(f"Number of threads to use (default: {threads}): ").strip()
+    threads_input = input(f"\nNumber of threads to use (default: {threads}): ").strip()
     if threads_input:
         try:
             threads = int(threads_input)
@@ -182,7 +216,7 @@ def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[s
         except ValueError:
             print("Invalid number of threads. Using default value.")
     
-    return start_ip, end_ip, subnet, threads, test_name
+    return start_ip, end_ip, subnet, threads, (start_port, end_port), test_name
 
 
 def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) -> Dict:
@@ -220,21 +254,24 @@ def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) ->
     return results_summary
 
 
-def run_minecraft_scan(ip_list: List[str], max_workers: int = 50) -> Dict[str, Any]:
+def run_minecraft_scan(ip_list: List[str], max_workers: int = 50, port_range: Tuple[int, int] = (2048, 30000)) -> Dict[str, Any]:
     """
     Run the Minecraft server scan and return the results.
+    Uses the mcsrvstat.us API for reliable Minecraft server detection.
     
     Args:
         ip_list: List of IP addresses to scan
         max_workers: Maximum number of concurrent workers
+        port_range: Tuple of (start_port, end_port) to scan
         
     Returns:
-        Dict[str, Any]: Minecraft scan results
+        Dict[str, Any]: Minecraft scan results with detailed server information
+                        including version, player count, MOTD, and other server details
     """
     start_time = time.time()
     
     # Run the Minecraft scan with progress reporting
-    minecraft_results = scan_minecraft_servers_with_progress(ip_list, (2048, 30000), max_workers)
+    minecraft_results = scan_minecraft_servers_with_progress(ip_list, port_range, max_workers)
     
     # Create scan info
     scan_duration = time.time() - start_time
@@ -244,7 +281,7 @@ def run_minecraft_scan(ip_list: List[str], max_workers: int = 50) -> Dict[str, A
         'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
         'duration': scan_duration,
         'scan_method': 'minecraft',
-        'port_range': [2048, 30000],
+        'port_range': list(port_range),  # Convert tuple to list for JSON compatibility
         'total_ips': len(ip_list),
         'minecraft_servers': {
             'count': len(minecraft_results),
@@ -256,15 +293,16 @@ def run_minecraft_scan(ip_list: List[str], max_workers: int = 50) -> Dict[str, A
     return results
 
 
-def format_minecraft_results(minecraft_results: Dict[str, List[int]]) -> str:
+def format_minecraft_results(minecraft_results: Dict[str, Dict[int, Dict[str, Any]]]) -> str:
     """
     Format Minecraft scan results for console display.
+    Includes detailed server information from the mcsrvstat.us API.
     
     Args:
-        minecraft_results: Dictionary mapping IP addresses to lists of ports
+        minecraft_results: Dictionary mapping IP addresses to dictionaries of port->server info
         
     Returns:
-        str: Formatted string representation of the Minecraft scan results
+        str: Formatted string representation of the Minecraft scan results with detailed server information
     """
     # Create a horizontal line for separation
     separator = "=" * 80
@@ -275,15 +313,61 @@ def format_minecraft_results(minecraft_results: Dict[str, List[int]]) -> str:
     # Format server list
     if minecraft_results:
         server_count = len(minecraft_results)
-        server_section = [f"MINECRAFT SERVERS FOUND: {server_count}"]
+        total_ports = sum(len(ports) for ports in minecraft_results.values())
+        server_section = [f"MINECRAFT SERVERS FOUND: {server_count} IPs with {total_ports} server ports"]
         
-        for ip, ports in minecraft_results.items():
-            server_section.append(f"  {ip}: {', '.join(map(str, ports))}")
+        for ip, servers in minecraft_results.items():
+            server_section.append(f"\n  IP: {ip}")
+            
+            for port, server_data in servers.items():
+                # Basic port information
+                server_section.append(f"    Port: {port}")
+                
+                # Extract and display detailed server information if available
+                if isinstance(server_data, dict) and server_data.get("online", False):
+                    # Version information
+                    version = server_data.get("version", "Unknown")
+                    server_section.append(f"      Version: {version}")
+                    
+                    # MOTD (Message of the Day)
+                    motd = server_data.get("motd", {})
+                    if isinstance(motd, dict) and "clean" in motd and motd["clean"]:
+                        motd_lines = motd["clean"]
+                        for i, line in enumerate(motd_lines):
+                            prefix = "      MOTD: " if i == 0 else "           "
+                            server_section.append(f"{prefix}{line}")
+                    
+                    # Player information
+                    players = server_data.get("players", {})
+                    if isinstance(players, dict):
+                        online = players.get("online", "?")
+                        max_players = players.get("max", "?")
+                        server_section.append(f"      Players: {online}/{max_players}")
+                        
+                        # List some players if available
+                        player_list = players.get("list", [])
+                        if player_list:
+                            player_names = [p.get("name", "?") for p in player_list[:5]]
+                            if len(player_list) > 5:
+                                player_names.append(f"and {len(player_list) - 5} more")
+                            server_section.append(f"      Online: {', '.join(player_names)}")
+                    
+                    # Software information
+                    software = server_data.get("software", "")
+                    if software:
+                        server_section.append(f"      Software: {software}")
+                    
+                    # Additional information
+                    if "hostname" in server_data:
+                        server_section.append(f"      Hostname: {server_data['hostname']}")
+                else:
+                    server_section.append(f"      Status: Minecraft server detected (limited information)")
     else:
         server_section = ["NO MINECRAFT SERVERS FOUND"]
     
     # Combine all sections
     sections = header + [""] + server_section + ["", separator]
+    sections.append("Note: Server information provided by mcsrvstat.us API")
     
     return "\n".join(sections)
 
@@ -340,7 +424,7 @@ def main():
             max_workers = args.workers
         else:
             # Minecraft Scanner mode
-            start_ip, end_ip, subnet, threads, test_name = get_minecraft_scan_input()
+            start_ip, end_ip, subnet, threads, port_range, test_name = get_minecraft_scan_input()
             
             # Exit if no valid input
             if not start_ip and not end_ip and not subnet:
@@ -359,7 +443,8 @@ def main():
                 output=None,
                 format="json",
                 no_color=False,
-                test_name=test_name
+                test_name=test_name,
+                port_range=port_range
             )
             max_workers = threads
     
@@ -382,7 +467,13 @@ def main():
         print("\n" + formatted_results)
     else:
         # Run the Minecraft scan (beautified display is handled within the scan function)
-        results = run_minecraft_scan(ip_list, max_workers)
+        port_range = args.port_range if hasattr(args, 'port_range') else (2048, 30000)
+        results = run_minecraft_scan(ip_list, max_workers, port_range)
+        
+        # Display a formatted summary of the results
+        minecraft_servers = results['minecraft_servers']['servers']
+        formatted_results = format_minecraft_results(minecraft_servers)
+        print("\n" + formatted_results)
     
     # Save results if requested
     if hasattr(args, 'output') and args.output:

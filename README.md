@@ -12,7 +12,7 @@ A command-line tool for scanning IP ranges or subnets to identify active and ina
 - Interactive mode for easy usage
 - Modular design for future extensions
 - Test name input and organized output directories
-- Minecraft server port scanner (ports 2048-30000)
+- Minecraft server port scanner with configurable port range
 - Configurable thread count for optimized scanning speed
 - Beautified live progress display for Minecraft scanning
 
@@ -102,6 +102,7 @@ Then, you'll be prompted to enter:
 - Subnet (if no IP range is provided)
 
 For Minecraft scanning, you'll also be prompted to enter:
+- Port range to scan (start port and end port)
 - Number of threads to use for scanning
 
 ### Examples
@@ -138,14 +139,36 @@ python main.py --subnet 192.168.1.0/24 --workers 100
 
 ## Minecraft Port Scanner
 
-The Minecraft Port Scanner allows you to scan IP ranges or subnets for Minecraft servers running on ports 2048-30000. This feature is currently available only in interactive mode.
+The Minecraft Port Scanner allows you to scan IP ranges or subnets for Minecraft servers on user-defined port ranges. This feature is currently available only in interactive mode.
 
 ### How It Works
 
 1. The scanner checks each IP in the specified range or subnet
-2. For each IP, it scans ports 2048-30000 using multi-threading
-3. It detects Minecraft servers by attempting to establish a connection and sending a handshake packet
+2. For each IP, it scans the user-defined port range (default: 2048-30000) using multi-threading
+3. It detects Minecraft servers using two methods:
+   - First, it attempts a quick socket connection to check if the port is open
+   - Then, it uses the mcsrvstat.us API to reliably identify Minecraft servers and gather detailed information
 4. Results are saved in the specified test directory structure
+
+### API Integration
+
+The scanner uses the [mcsrvstat.us API](https://api.mcsrvstat.us/) to reliably detect Minecraft servers and gather detailed information:
+
+- **Server Version**: Identifies the Minecraft version running on the server
+- **Player Information**: Shows online/max players and lists currently connected players
+- **MOTD (Message of the Day)**: Displays the server's welcome message
+- **Server Software**: Identifies the server software (e.g., Vanilla, Spigot, Paper)
+- **Additional Details**: Provides hostname, protocol version, and other server-specific information
+
+This API integration ensures reliable detection and provides much more detailed information than traditional port scanning methods. The API is cached for 5 minutes and requires a proper User-Agent header, which is automatically handled by the scanner.
+
+### Configurable Port Range
+
+You can specify your own port range to scan:
+- Default range is 2048-30000 if no custom range is provided
+- Enter custom start port and end port during the interactive setup
+- The scanner validates that ports are within valid range (1-65535)
+- If start port is greater than end port, they will be automatically swapped
 
 ### Beautified Live Progress Display
 
@@ -195,11 +218,30 @@ Results saved to: scan_results_20250729_235944.json
 ROCON MINECRAFT SCANNER - SCAN RESULTS
 ================================================================================
 
-MINECRAFT SERVERS FOUND: 2
-  192.168.1.100: 25565, 25566
-  192.168.1.120: 25565
+MINECRAFT SERVERS FOUND: 2 IPs with 3 server ports
+
+  IP: 192.168.1.100
+    Port: 25565
+      Version: 1.19.2
+      MOTD: Welcome to our Minecraft server!
+      Players: 12/50 online (Steve, Alex, and 10 more)
+      Software: Paper
+
+    Port: 25566
+      Version: 1.18.2
+      MOTD: Creative mode server
+      Players: 5/20 online (Builder123, Redstone_Master, Architect99)
+      Software: Spigot
+
+  IP: 192.168.1.120
+    Port: 25565
+      Version: 1.20.1
+      MOTD: Survival server - No griefing!
+      Players: 8/30 online (Player1, Player2, Player3, and 5 more)
+      Software: Vanilla
 
 ================================================================================
+Note: Server information provided by mcsrvstat.us API
 Results saved to: output/minecraft_test/scan_results_20250730_001523.json
 ```
 
@@ -241,4 +283,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - Built with Python's standard library
+- Minecraft server detection powered by the [mcsrvstat.us API](https://api.mcsrvstat.us/)
 - Developed as part of the ROCON tools suite
