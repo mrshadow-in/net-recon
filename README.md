@@ -21,7 +21,12 @@ A command-line tool for scanning IP ranges or subnets to identify active and ina
 ### Prerequisites
 
 - Python 3.6 or higher
-- No external dependencies required (uses standard library modules)
+- No runtime dependencies required (uses standard library modules)
+- Development dependencies (for contributors):
+  - pytest: For running tests
+  - pytest-cov: For test coverage reporting
+  - flake8: For code linting
+  - black: For code formatting
 
 ### Setup
 
@@ -32,7 +37,13 @@ git clone https://github.com/yourusername/rocon-ip-scanner.git
 cd rocon-ip-scanner
 ```
 
-2. Make the script executable (Linux/macOS):
+2. (Optional) Install development dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Make the script executable (Linux/macOS):
 
 ```bash
 chmod +x main.py

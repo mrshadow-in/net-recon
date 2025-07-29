@@ -1,0 +1,11 @@
+# ROCON Scanner Requirements
+# Python >= 3.6 is required for f-strings and other features
+
+# No external dependencies are required as the project uses only standard library modules
+# This file is included for compatibility with standard Python project structures
+
+# For development and testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+flake8>=6.0.0
+black>=23.0.0
