@@ -130,13 +130,24 @@ def get_user_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optio
     return start_ip, end_ip, subnet, test_name
 
 
-def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], Optional[str]]:
+def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], float, bool, int, int, float, bool, Optional[str]]:
     """
     Get input for Minecraft server scanning.
     
     Returns:
-        Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], Optional[str]]: 
-            (start_ip, end_ip, subnet, threads, port_range, test_name)
+        Tuple containing:
+            - start_ip (Optional[str]): Starting IP address
+            - end_ip (Optional[str]): Ending IP address
+            - subnet (Optional[str]): Subnet in CIDR notation
+            - threads (int): Number of concurrent threads to use
+            - port_range (Tuple[int, int]): Range of ports to scan
+            - timeout (float): Timeout in seconds for each port check
+            - skip_socket_check (bool): Whether to skip socket check and directly use API
+            - retries (int): Number of retry attempts for API calls
+            - batch_size (int): Number of ports to scan in each batch
+            - delay_between_batches (float): Delay in seconds between batches
+            - verbose (bool): Whether to print detailed debugging information
+            - test_name (Optional[str]): Name of the test
     """
     print("\nROCON Minecraft Scanner - Interactive Mode")
     print("=========================================")
@@ -205,18 +216,83 @@ def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[s
         start_port, end_port = end_port, start_port
     
     # Get number of threads
-    threads = 50  # Default value
+    threads = 20  # Default value
     threads_input = input(f"\nNumber of threads to use (default: {threads}): ").strip()
     if threads_input:
         try:
             threads = int(threads_input)
             if threads < 1:
                 print("Number of threads must be at least 1. Using default value.")
-                threads = 50
+                threads = 20
         except ValueError:
             print("Invalid number of threads. Using default value.")
     
-    return start_ip, end_ip, subnet, threads, (start_port, end_port), test_name
+    # Get timeout
+    timeout = 2.0  # Default value
+    timeout_input = input(f"\nTimeout in seconds for each port check (default: {timeout}): ").strip()
+    if timeout_input:
+        try:
+            timeout = float(timeout_input)
+            if timeout <= 0:
+                print("Timeout must be greater than 0. Using default value.")
+                timeout = 2.0
+        except ValueError:
+            print("Invalid timeout. Using default value.")
+    
+    # Get advanced options
+    print("\nAdvanced Options (press Enter to use defaults):")
+    
+    # Skip socket check option
+    skip_socket_check = False  # Default value
+    skip_socket_input = input("Skip socket check and directly use API? This is more reliable but slower (y/n, default: n): ").strip().lower()
+    if skip_socket_input and skip_socket_input[0] == 'y':
+        skip_socket_check = True
+        print("Socket check will be skipped. API will be used directly for all ports.")
+    
+    # Get retries
+    retries = 2  # Default value
+    retries_input = input(f"Number of retry attempts for API calls (default: {retries}): ").strip()
+    if retries_input:
+        try:
+            retries = int(retries_input)
+            if retries < 0:
+                print("Retries must be non-negative. Using default value.")
+                retries = 2
+        except ValueError:
+            print("Invalid retries. Using default value.")
+    
+    # Get batch size
+    batch_size = 100  # Default value
+    batch_size_input = input(f"Number of ports to scan in each batch (default: {batch_size}): ").strip()
+    if batch_size_input:
+        try:
+            batch_size = int(batch_size_input)
+            if batch_size < 1:
+                print("Batch size must be at least 1. Using default value.")
+                batch_size = 100
+        except ValueError:
+            print("Invalid batch size. Using default value.")
+    
+    # Get delay between batches
+    delay = 1.0  # Default value
+    delay_input = input(f"Delay in seconds between batches (default: {delay}): ").strip()
+    if delay_input:
+        try:
+            delay = float(delay_input)
+            if delay < 0:
+                print("Delay must be non-negative. Using default value.")
+                delay = 1.0
+        except ValueError:
+            print("Invalid delay. Using default value.")
+    
+    # Get verbose option
+    verbose = False  # Default value
+    verbose_input = input("Show detailed debugging information? (y/n, default: n): ").strip().lower()
+    if verbose_input and verbose_input[0] == 'y':
+        verbose = True
+        print("Verbose mode enabled. Detailed debugging information will be shown.")
+    
+    return start_ip, end_ip, subnet, threads, (start_port, end_port), timeout, skip_socket_check, retries, batch_size, delay, verbose, test_name
 
 
 def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) -> Dict:
@@ -254,7 +330,10 @@ def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) ->
     return results_summary
 
 
-def run_minecraft_scan(ip_list: List[str], max_workers: int = 50, port_range: Tuple[int, int] = (2048, 30000)) -> Dict[str, Any]:
+def run_minecraft_scan(ip_list: List[str], max_workers: int = 20, port_range: Tuple[int, int] = (2048, 30000),
+                  timeout: float = 2.0, skip_socket_check: bool = False, retries: int = 2,
+                  batch_size: int = 100, delay_between_batches: float = 1.0,
+                  verbose: bool = False) -> Dict[str, Any]:
     """
     Run the Minecraft server scan and return the results.
     Uses the mcsrvstat.us API for reliable Minecraft server detection.
@@ -263,6 +342,12 @@ def run_minecraft_scan(ip_list: List[str], max_workers: int = 50, port_range: Tu
         ip_list: List of IP addresses to scan
         max_workers: Maximum number of concurrent workers
         port_range: Tuple of (start_port, end_port) to scan
+        timeout: Timeout in seconds for each port check
+        skip_socket_check: Whether to skip socket check and directly use API (more reliable but slower)
+        retries: Number of retry attempts for API calls
+        batch_size: Number of ports to scan in each batch
+        delay_between_batches: Delay in seconds between batches to avoid API rate limiting
+        verbose: Whether to print detailed debugging information
         
     Returns:
         Dict[str, Any]: Minecraft scan results with detailed server information
@@ -271,7 +356,17 @@ def run_minecraft_scan(ip_list: List[str], max_workers: int = 50, port_range: Tu
     start_time = time.time()
     
     # Run the Minecraft scan with progress reporting
-    minecraft_results = scan_minecraft_servers_with_progress(ip_list, port_range, max_workers)
+    minecraft_results = scan_minecraft_servers_with_progress(
+        ip_list, 
+        port_range, 
+        max_workers,
+        timeout,
+        skip_socket_check,
+        retries,
+        batch_size,
+        delay_between_batches,
+        verbose
+    )
     
     # Create scan info
     scan_duration = time.time() - start_time
@@ -424,7 +519,7 @@ def main():
             max_workers = args.workers
         else:
             # Minecraft Scanner mode
-            start_ip, end_ip, subnet, threads, port_range, test_name = get_minecraft_scan_input()
+            start_ip, end_ip, subnet, threads, port_range, timeout, skip_socket_check, retries, batch_size, delay, verbose, test_name = get_minecraft_scan_input()
             
             # Exit if no valid input
             if not start_ip and not end_ip and not subnet:
@@ -444,7 +539,13 @@ def main():
                 format="json",
                 no_color=False,
                 test_name=test_name,
-                port_range=port_range
+                port_range=port_range,
+                timeout=timeout,
+                skip_socket_check=skip_socket_check,
+                retries=retries,
+                batch_size=batch_size,
+                delay_between_batches=delay,
+                verbose=verbose
             )
             max_workers = threads
     
@@ -468,7 +569,24 @@ def main():
     else:
         # Run the Minecraft scan (beautified display is handled within the scan function)
         port_range = args.port_range if hasattr(args, 'port_range') else (2048, 30000)
-        results = run_minecraft_scan(ip_list, max_workers, port_range)
+        timeout = args.timeout if hasattr(args, 'timeout') else 2.0
+        skip_socket_check = args.skip_socket_check if hasattr(args, 'skip_socket_check') else False
+        retries = args.retries if hasattr(args, 'retries') else 2
+        batch_size = args.batch_size if hasattr(args, 'batch_size') else 100
+        delay_between_batches = args.delay_between_batches if hasattr(args, 'delay_between_batches') else 1.0
+        verbose = args.verbose if hasattr(args, 'verbose') else False
+        
+        results = run_minecraft_scan(
+            ip_list, 
+            max_workers, 
+            port_range,
+            timeout,
+            skip_socket_check,
+            retries,
+            batch_size,
+            delay_between_batches,
+            verbose
+        )
         
         # Display a formatted summary of the results
         minecraft_servers = results['minecraft_servers']['servers']

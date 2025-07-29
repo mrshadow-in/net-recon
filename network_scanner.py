@@ -145,7 +145,7 @@ def scan_with_progress(ip_list: List[str], method: str = 'ping', max_workers: in
     return results
 
 
-def check_minecraft_server_api(ip: str, port: int = None, timeout: float = 5.0) -> Dict[str, Any]:
+def check_minecraft_server_api(ip: str, port: int = None, timeout: float = 10.0, retries: int = 2, verbose: bool = False) -> Dict[str, Any]:
     """
     Check if a specific IP and port is a Minecraft server using the mcsrvstat.us API.
     
@@ -153,6 +153,8 @@ def check_minecraft_server_api(ip: str, port: int = None, timeout: float = 5.0) 
         ip: IP address or hostname to check
         port: Port to check (optional, the API will find it if not specified)
         timeout: Timeout in seconds for the API request
+        retries: Number of retry attempts if the request fails
+        verbose: Whether to print detailed information
         
     Returns:
         Dict[str, Any]: Dictionary with server information, including 'online' status
@@ -171,30 +173,92 @@ def check_minecraft_server_api(ip: str, port: int = None, timeout: float = 5.0) 
         "User-Agent": "ROCON-Scanner/1.0 (https://github.com/yourusername/rocon-ip-scanner)"
     }
     
-    try:
-        # Create a request object with headers
-        req = urllib.request.Request(url, headers=headers)
-        
-        # Open the URL with timeout
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            # Parse the JSON response
-            data = json.loads(response.read().decode('utf-8'))
-            return data
-    except urllib.error.HTTPError as e:
-        # Handle HTTP errors (e.g., 403 Forbidden)
-        return {"online": False, "error": f"HTTP Error: {e.code} {e.reason}"}
-    except urllib.error.URLError as e:
-        # Handle URL errors (e.g., connection timeout)
-        return {"online": False, "error": f"URL Error: {e.reason}"}
-    except json.JSONDecodeError:
-        # Handle invalid JSON response
-        return {"online": False, "error": "Invalid JSON response from API"}
-    except Exception as e:
-        # Handle any other exceptions
-        return {"online": False, "error": f"Error: {str(e)}"}
+    # Try multiple times in case of temporary failures
+    for attempt in range(retries + 1):
+        try:
+            if verbose and attempt > 0:
+                print(f"Retry attempt {attempt} for {ip}:{port}")
+                
+            # Create a request object with headers
+            req = urllib.request.Request(url, headers=headers)
+            
+            # Open the URL with timeout
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                # Parse the JSON response
+                data = json.loads(response.read().decode('utf-8'))
+                
+                if verbose:
+                    if data.get("online", False):
+                        print(f"Found Minecraft server at {ip}:{port} - Version: {data.get('version', 'Unknown')}")
+                
+                return data
+        except urllib.error.HTTPError as e:
+            # Handle HTTP errors (e.g., 403 Forbidden)
+            error = f"HTTP Error: {e.code} {e.reason}"
+            if verbose:
+                print(f"API error for {ip}:{port} - {error}")
+            
+            # If it's a rate limiting error (429), wait longer before retrying
+            if e.code == 429 and attempt < retries:
+                wait_time = 5 * (attempt + 1)  # Exponential backoff
+                if verbose:
+                    print(f"Rate limited. Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+                continue
+                
+            # If we've exhausted retries or it's not a retryable error, return error
+            if attempt >= retries:
+                return {"online": False, "error": error}
+        except urllib.error.URLError as e:
+            # Handle URL errors (e.g., connection timeout)
+            error = f"URL Error: {e.reason}"
+            if verbose:
+                print(f"API error for {ip}:{port} - {error}")
+            
+            # Retry for timeout errors
+            if "timeout" in str(e.reason).lower() and attempt < retries:
+                wait_time = 2 * (attempt + 1)  # Exponential backoff
+                if verbose:
+                    print(f"Timeout. Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+                continue
+                
+            if attempt >= retries:
+                return {"online": False, "error": error}
+        except json.JSONDecodeError:
+            # Handle invalid JSON response
+            error = "Invalid JSON response from API"
+            if verbose:
+                print(f"API error for {ip}:{port} - {error}")
+            
+            # This could be a temporary issue, retry
+            if attempt < retries:
+                time.sleep(2)
+                continue
+                
+            if attempt >= retries:
+                return {"online": False, "error": error}
+        except Exception as e:
+            # Handle any other exceptions
+            error = f"Error: {str(e)}"
+            if verbose:
+                print(f"API error for {ip}:{port} - {error}")
+            
+            # Generic retry for other errors
+            if attempt < retries:
+                time.sleep(2)
+                continue
+                
+            if attempt >= retries:
+                return {"online": False, "error": error}
+    
+    # This should never be reached, but just in case
+    return {"online": False, "error": "Unknown error occurred"}
 
 
-def check_minecraft_server(ip: str, port: int, timeout: float = 1.0) -> Union[bool, Dict[str, Any]]:
+def check_minecraft_server(ip: str, port: int, timeout: float = 2.0, 
+                       skip_socket_check: bool = False, retries: int = 2, 
+                       verbose: bool = False) -> Union[bool, Dict[str, Any]]:
     """
     Check if a specific IP and port is a Minecraft server.
     Uses the mcsrvstat.us API for reliable detection.
@@ -203,25 +267,42 @@ def check_minecraft_server(ip: str, port: int, timeout: float = 1.0) -> Union[bo
         ip: IP address to check
         port: Port to check
         timeout: Timeout in seconds
+        skip_socket_check: Whether to skip the socket check and directly use the API
+        retries: Number of retry attempts for API calls
+        verbose: Whether to print detailed information
         
     Returns:
         Union[bool, Dict[str, Any]]: True/False for backward compatibility or server info dictionary
     """
-    # First check if the port is open using a quick socket connection
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    
-    try:
-        result = sock.connect_ex((ip, port))
-        if result != 0:
+    # Skip socket check if requested (more reliable but slower)
+    if not skip_socket_check:
+        # First check if the port is open using a quick socket connection
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        
+        try:
+            if verbose:
+                print(f"Checking if port {port} is open on {ip}...")
+                
+            result = sock.connect_ex((ip, port))
+            if result != 0:
+                if verbose:
+                    print(f"Port {port} is closed on {ip}")
+                return False
+                
+            if verbose:
+                print(f"Port {port} is open on {ip}, checking if it's a Minecraft server...")
+        except Exception as e:
+            if verbose:
+                print(f"Socket error for {ip}:{port} - {str(e)}")
             return False
-    except Exception:
-        return False
-    finally:
-        sock.close()
+        finally:
+            sock.close()
+    elif verbose:
+        print(f"Skipping socket check for {ip}:{port}, directly using API...")
     
-    # If the port is open, use the API to check if it's a Minecraft server
-    server_info = check_minecraft_server_api(ip, port, timeout=timeout)
+    # If the port is open or we're skipping the socket check, use the API
+    server_info = check_minecraft_server_api(ip, port, timeout=timeout, retries=retries, verbose=verbose)
     
     # For backward compatibility, return True if the server is online
     if isinstance(server_info, dict) and server_info.get("online", False):
@@ -230,8 +311,11 @@ def check_minecraft_server(ip: str, port: int, timeout: float = 1.0) -> Union[bo
     return False
 
 
-def scan_minecraft_ports(ip: str, port_range: Tuple[int, int] = (2048, 30000), max_workers: int = 50, timeout: float = 0.5, 
-                  progress_callback=None) -> Dict[int, Dict[str, Any]]:
+def scan_minecraft_ports(ip: str, port_range: Tuple[int, int] = (2048, 30000), 
+                  max_workers: int = 20, timeout: float = 2.0, 
+                  skip_socket_check: bool = False, retries: int = 2,
+                  batch_size: int = 100, delay_between_batches: float = 1.0,
+                  verbose: bool = False, progress_callback=None) -> Dict[int, Dict[str, Any]]:
     """
     Scan a range of ports on a single IP for Minecraft servers.
     
@@ -240,6 +324,11 @@ def scan_minecraft_ports(ip: str, port_range: Tuple[int, int] = (2048, 30000), m
         port_range: Tuple of (start_port, end_port) to scan
         max_workers: Maximum number of concurrent workers
         timeout: Timeout in seconds for each port check
+        skip_socket_check: Whether to skip socket check and directly use API
+        retries: Number of retry attempts for API calls
+        batch_size: Number of ports to scan in each batch
+        delay_between_batches: Delay in seconds between batches
+        verbose: Whether to print detailed information
         progress_callback: Optional callback function to report progress
                           Called with (current_port, ports_completed, total_ports)
         
@@ -256,34 +345,72 @@ def scan_minecraft_ports(ip: str, port_range: Tuple[int, int] = (2048, 30000), m
     if progress_callback:
         progress_callback(start_port, 0, total_ports)
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        futures = {executor.submit(check_minecraft_server, ip, port, timeout): port for port in ports}
+    # Process ports in batches to avoid overwhelming the API
+    for i in range(0, total_ports, batch_size):
+        batch_ports = ports[i:i+batch_size]
         
-        # Process results as they complete
-        for future in futures:
-            port = futures[future]
-            try:
-                result = future.result()
-                if result:
-                    if isinstance(result, dict):
-                        # Store the full server info
-                        minecraft_servers[port] = result
-                    else:
-                        # For backward compatibility if result is just True
-                        minecraft_servers[port] = {"online": True}
-            except Exception:
-                pass
+        if verbose:
+            print(f"Scanning batch of {len(batch_ports)} ports ({batch_ports[0]}-{batch_ports[-1]}) on {ip}")
+        
+        # Use a smaller number of workers for API calls to avoid rate limiting
+        actual_max_workers = min(max_workers, len(batch_ports))
+        
+        with ThreadPoolExecutor(max_workers=actual_max_workers) as executor:
+            # Submit tasks for this batch
+            futures = {
+                executor.submit(
+                    check_minecraft_server, 
+                    ip, 
+                    port, 
+                    timeout=timeout,
+                    skip_socket_check=skip_socket_check,
+                    retries=retries,
+                    verbose=verbose
+                ): port for port in batch_ports
+            }
             
-            # Update progress
-            completed_ports += 1
-            if progress_callback:
-                progress_callback(port, completed_ports, total_ports)
+            # Process results as they complete
+            for future in futures:
+                port = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        if isinstance(result, dict):
+                            # Store the full server info
+                            minecraft_servers[port] = result
+                            if verbose:
+                                print(f"✅ Found Minecraft server at {ip}:{port}")
+                        else:
+                            # For backward compatibility if result is just True
+                            minecraft_servers[port] = {"online": True}
+                            if verbose:
+                                print(f"✅ Found Minecraft server at {ip}:{port} (limited info)")
+                except Exception as e:
+                    if verbose:
+                        print(f"❌ Error checking {ip}:{port} - {str(e)}")
+                
+                # Update progress
+                completed_ports += 1
+                if progress_callback:
+                    progress_callback(port, completed_ports, total_ports)
+        
+        # Add a delay between batches to avoid overwhelming the API
+        if i + batch_size < total_ports and delay_between_batches > 0:
+            if verbose:
+                print(f"Waiting {delay_between_batches}s before next batch...")
+            time.sleep(delay_between_batches)
+    
+    if verbose:
+        print(f"Completed scan of {total_ports} ports on {ip}, found {len(minecraft_servers)} Minecraft servers")
     
     return minecraft_servers
 
 
-def scan_minecraft_servers(ip_list: List[str], port_range: Tuple[int, int] = (2048, 30000), max_workers: int = 50, timeout: float = 0.5) -> Dict[str, Dict[int, Dict[str, Any]]]:
+def scan_minecraft_servers(ip_list: List[str], port_range: Tuple[int, int] = (2048, 30000), 
+                       max_workers: int = 20, timeout: float = 2.0,
+                       skip_socket_check: bool = False, retries: int = 2,
+                       batch_size: int = 100, delay_between_batches: float = 1.0,
+                       verbose: bool = False) -> Dict[str, Dict[int, Dict[str, Any]]]:
     """
     Scan multiple IPs for Minecraft servers.
     
@@ -292,6 +419,11 @@ def scan_minecraft_servers(ip_list: List[str], port_range: Tuple[int, int] = (20
         port_range: Tuple of (start_port, end_port) to scan
         max_workers: Maximum number of concurrent workers
         timeout: Timeout in seconds for each port check
+        skip_socket_check: Whether to skip socket check and directly use API
+        retries: Number of retry attempts for API calls
+        batch_size: Number of ports to scan in each batch
+        delay_between_batches: Delay in seconds between batches
+        verbose: Whether to print detailed information
         
     Returns:
         Dict[str, Dict[int, Dict[str, Any]]]: Dictionary mapping IP addresses to dictionaries of port->server info
@@ -299,9 +431,27 @@ def scan_minecraft_servers(ip_list: List[str], port_range: Tuple[int, int] = (20
     results = {}
     
     for ip in ip_list:
-        minecraft_servers = scan_minecraft_ports(ip, port_range, max_workers, timeout)
+        if verbose:
+            print(f"\nScanning IP: {ip} for Minecraft servers...")
+            
+        minecraft_servers = scan_minecraft_ports(
+            ip, 
+            port_range, 
+            max_workers, 
+            timeout,
+            skip_socket_check,
+            retries,
+            batch_size,
+            delay_between_batches,
+            verbose
+        )
+        
         if minecraft_servers:
             results[ip] = minecraft_servers
+            if verbose:
+                print(f"Found {len(minecraft_servers)} Minecraft servers on {ip}")
+        elif verbose:
+            print(f"No Minecraft servers found on {ip}")
     
     return results
 
@@ -350,7 +500,11 @@ def format_time(seconds: float) -> str:
     return f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
 
 
-def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[int, int] = (2048, 30000), max_workers: int = 50, timeout: float = 0.5) -> Dict[str, Dict[int, Dict[str, Any]]]:
+def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[int, int] = (2048, 30000), 
+                                max_workers: int = 20, timeout: float = 2.0,
+                                skip_socket_check: bool = False, retries: int = 2,
+                                batch_size: int = 100, delay_between_batches: float = 1.0,
+                                verbose: bool = False) -> Dict[str, Dict[int, Dict[str, Any]]]:
     """
     Scan multiple IPs for Minecraft servers with beautified live progress reporting.
     Shows progress bars for both IP scanning and port scanning of the current IP.
@@ -361,6 +515,11 @@ def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[i
         port_range: Tuple of (start_port, end_port) to scan
         max_workers: Maximum number of concurrent workers
         timeout: Timeout in seconds for each port check
+        skip_socket_check: Whether to skip socket check and directly use API (more reliable but slower)
+        retries: Number of retry attempts for API calls
+        batch_size: Number of ports to scan in each batch
+        delay_between_batches: Delay in seconds between batches to avoid API rate limiting
+        verbose: Whether to print detailed debugging information
         
     Returns:
         Dict[str, Dict[int, Dict[str, Any]]]: Dictionary mapping IP addresses to dictionaries of port->server info
@@ -486,7 +645,15 @@ def scan_minecraft_servers_with_progress(ip_list: List[str], port_range: Tuple[i
         
         # Scan the IP for Minecraft servers with progress reporting
         minecraft_servers = scan_minecraft_ports(
-            ip, port_range, max_workers, timeout, 
+            ip, 
+            port_range, 
+            max_workers, 
+            timeout,
+            skip_socket_check,
+            retries,
+            batch_size,
+            delay_between_batches,
+            verbose and not skip_socket_check,  # Only show verbose output if not already showing in progress display
             progress_callback=port_progress_callback
         )
         

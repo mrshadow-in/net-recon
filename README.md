@@ -191,6 +191,42 @@ This enhanced display makes it easier to monitor long-running scans at both the 
 - Higher thread counts can significantly improve scanning speed, especially for large port ranges
 - The scanner is optimized to minimize false positives and negatives
 
+### Advanced Reliability Options
+
+The Minecraft scanner includes several advanced options to improve reliability, especially for challenging networks or specific IP ranges:
+
+- **Skip Socket Check**: Bypasses the initial socket connection check and directly uses the API for all ports
+  - More reliable for detecting servers behind firewalls or with unusual configurations
+  - Slower but more thorough, as it checks all ports with the API
+  - Recommended for problematic IPs where standard detection fails
+
+- **Timeout Configuration**: Adjust the timeout for socket connections and API calls
+  - Default is 2.0 seconds, which works well for most networks
+  - Increase for slow or congested networks
+  - Decrease for faster scanning on reliable networks
+
+- **Retry Mechanism**: Automatically retry failed API calls
+  - Default is 2 retries with exponential backoff
+  - Helps overcome temporary network issues or API rate limiting
+  - Particularly useful for large scans or when the API is under heavy load
+
+- **Batch Processing**: Process ports in smaller batches to avoid overwhelming the API
+  - Default batch size is 100 ports
+  - Smaller batches are more reliable but slower
+  - Larger batches are faster but may trigger rate limiting
+
+- **Delay Between Batches**: Add a delay between processing batches of ports
+  - Default is 1.0 second between batches
+  - Helps avoid API rate limiting for large scans
+  - Adjust based on scan size and network conditions
+
+- **Verbose Mode**: Enable detailed logging for troubleshooting
+  - Shows detailed information about each step of the scanning process
+  - Helps diagnose issues with specific IPs or ports
+  - Useful for understanding why servers aren't being detected
+
+These options are available in the interactive mode and can be configured based on your specific needs. For particularly challenging scans (like the IP range 129.154.37.211 with ports 25565-25599), using a combination of these options can significantly improve detection rates.
+
 ## Output Examples
 
 ### IP Scanner Output
