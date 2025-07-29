@@ -12,7 +12,7 @@ A command-line tool for scanning IP ranges or subnets to identify active and ina
 - Interactive mode for easy usage
 - Modular design for future extensions
 - Test name input and organized output directories
-- Minecraft server port scanner (ports 2048-30000)
+- Minecraft server port scanner with configurable port range
 - Configurable thread count for optimized scanning speed
 - Beautified live progress display for Minecraft scanning
 
@@ -102,6 +102,7 @@ Then, you'll be prompted to enter:
 - Subnet (if no IP range is provided)
 
 For Minecraft scanning, you'll also be prompted to enter:
+- Port range to scan (start port and end port)
 - Number of threads to use for scanning
 
 ### Examples
@@ -138,14 +139,22 @@ python main.py --subnet 192.168.1.0/24 --workers 100
 
 ## Minecraft Port Scanner
 
-The Minecraft Port Scanner allows you to scan IP ranges or subnets for Minecraft servers running on ports 2048-30000. This feature is currently available only in interactive mode.
+The Minecraft Port Scanner allows you to scan IP ranges or subnets for Minecraft servers on user-defined port ranges. This feature is currently available only in interactive mode.
 
 ### How It Works
 
 1. The scanner checks each IP in the specified range or subnet
-2. For each IP, it scans ports 2048-30000 using multi-threading
+2. For each IP, it scans the user-defined port range (default: 2048-30000) using multi-threading
 3. It detects Minecraft servers by attempting to establish a connection and sending a handshake packet
 4. Results are saved in the specified test directory structure
+
+### Configurable Port Range
+
+You can specify your own port range to scan:
+- Default range is 2048-30000 if no custom range is provided
+- Enter custom start port and end port during the interactive setup
+- The scanner validates that ports are within valid range (1-65535)
+- If start port is greater than end port, they will be automatically swapped
 
 ### Beautified Live Progress Display
 

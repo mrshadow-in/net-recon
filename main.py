@@ -130,13 +130,13 @@ def get_user_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optio
     return start_ip, end_ip, subnet, test_name
 
 
-def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], int, Optional[str]]:
+def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], Optional[str]]:
     """
     Get input for Minecraft server scanning.
     
     Returns:
-        Tuple[Optional[str], Optional[str], Optional[str], int, Optional[str]]: 
-            (start_ip, end_ip, subnet, threads, test_name)
+        Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], Optional[str]]: 
+            (start_ip, end_ip, subnet, threads, port_range, test_name)
     """
     print("\nROCON Minecraft Scanner - Interactive Mode")
     print("=========================================")
@@ -170,9 +170,43 @@ def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[s
             print(f"Error: Invalid subnet: {subnet}")
             subnet = None
     
+    # Get port range
+    default_start_port = 2048
+    default_end_port = 30000
+    print(f"\nEnter port range to scan (default: {default_start_port}-{default_end_port}):")
+    
+    # Get start port
+    start_port = default_start_port
+    start_port_input = input(f"Start port (default: {default_start_port}): ").strip()
+    if start_port_input:
+        try:
+            start_port = int(start_port_input)
+            if start_port < 1 or start_port > 65535:
+                print(f"Start port must be between 1 and 65535. Using default value: {default_start_port}.")
+                start_port = default_start_port
+        except ValueError:
+            print(f"Invalid start port. Using default value: {default_start_port}.")
+    
+    # Get end port
+    end_port = default_end_port
+    end_port_input = input(f"End port (default: {default_end_port}): ").strip()
+    if end_port_input:
+        try:
+            end_port = int(end_port_input)
+            if end_port < 1 or end_port > 65535:
+                print(f"End port must be between 1 and 65535. Using default value: {default_end_port}.")
+                end_port = default_end_port
+        except ValueError:
+            print(f"Invalid end port. Using default value: {default_end_port}.")
+    
+    # Ensure start_port <= end_port
+    if start_port > end_port:
+        print(f"Start port ({start_port}) is greater than end port ({end_port}). Swapping values.")
+        start_port, end_port = end_port, start_port
+    
     # Get number of threads
     threads = 50  # Default value
-    threads_input = input(f"Number of threads to use (default: {threads}): ").strip()
+    threads_input = input(f"\nNumber of threads to use (default: {threads}): ").strip()
     if threads_input:
         try:
             threads = int(threads_input)
@@ -182,7 +216,7 @@ def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[s
         except ValueError:
             print("Invalid number of threads. Using default value.")
     
-    return start_ip, end_ip, subnet, threads, test_name
+    return start_ip, end_ip, subnet, threads, (start_port, end_port), test_name
 
 
 def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) -> Dict:
@@ -220,13 +254,14 @@ def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) ->
     return results_summary
 
 
-def run_minecraft_scan(ip_list: List[str], max_workers: int = 50) -> Dict[str, Any]:
+def run_minecraft_scan(ip_list: List[str], max_workers: int = 50, port_range: Tuple[int, int] = (2048, 30000)) -> Dict[str, Any]:
     """
     Run the Minecraft server scan and return the results.
     
     Args:
         ip_list: List of IP addresses to scan
         max_workers: Maximum number of concurrent workers
+        port_range: Tuple of (start_port, end_port) to scan
         
     Returns:
         Dict[str, Any]: Minecraft scan results
@@ -234,7 +269,7 @@ def run_minecraft_scan(ip_list: List[str], max_workers: int = 50) -> Dict[str, A
     start_time = time.time()
     
     # Run the Minecraft scan with progress reporting
-    minecraft_results = scan_minecraft_servers_with_progress(ip_list, (2048, 30000), max_workers)
+    minecraft_results = scan_minecraft_servers_with_progress(ip_list, port_range, max_workers)
     
     # Create scan info
     scan_duration = time.time() - start_time
@@ -244,7 +279,7 @@ def run_minecraft_scan(ip_list: List[str], max_workers: int = 50) -> Dict[str, A
         'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
         'duration': scan_duration,
         'scan_method': 'minecraft',
-        'port_range': [2048, 30000],
+        'port_range': list(port_range),  # Convert tuple to list for JSON compatibility
         'total_ips': len(ip_list),
         'minecraft_servers': {
             'count': len(minecraft_results),
@@ -340,7 +375,7 @@ def main():
             max_workers = args.workers
         else:
             # Minecraft Scanner mode
-            start_ip, end_ip, subnet, threads, test_name = get_minecraft_scan_input()
+            start_ip, end_ip, subnet, threads, port_range, test_name = get_minecraft_scan_input()
             
             # Exit if no valid input
             if not start_ip and not end_ip and not subnet:
@@ -359,7 +394,8 @@ def main():
                 output=None,
                 format="json",
                 no_color=False,
-                test_name=test_name
+                test_name=test_name,
+                port_range=port_range
             )
             max_workers = threads
     
@@ -382,7 +418,8 @@ def main():
         print("\n" + formatted_results)
     else:
         # Run the Minecraft scan (beautified display is handled within the scan function)
-        results = run_minecraft_scan(ip_list, max_workers)
+        port_range = args.port_range if hasattr(args, 'port_range') else (2048, 30000)
+        results = run_minecraft_scan(ip_list, max_workers, port_range)
     
     # Save results if requested
     if hasattr(args, 'output') and args.output:
