@@ -2,10 +2,11 @@
 Output Formatter Module for ROCON Tools
 Provides functionality for formatting and displaying scan results in a beautified manner.
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import json
 from datetime import datetime
 import os
+import shutil
 
 
 def format_ip_list(ip_list: List[str], status: str, colored: bool = True) -> str:
@@ -120,7 +121,29 @@ def get_results_summary(active_ips: List[str], inactive_ips: List[str], scan_inf
     return summary
 
 
-def save_results_to_file(results: Dict[str, Any], file_path: str = None, format_type: str = 'json') -> str:
+def create_test_directories(test_name: str) -> Tuple[str, str]:
+    """
+    Create directories for storing test results.
+    
+    Args:
+        test_name: Name of the test
+        
+    Returns:
+        Tuple[str, str]: Paths to activeips and inactiveips directories
+    """
+    base_dir = os.path.join("output", test_name)
+    active_dir = os.path.join(base_dir, "activeips")
+    inactive_dir = os.path.join(base_dir, "inactiveips")
+    
+    # Create directories if they don't exist
+    for directory in [active_dir, inactive_dir]:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+    
+    return active_dir, inactive_dir
+
+
+def save_results_to_file(results: Dict[str, Any], file_path: str = None, format_type: str = 'json', test_name: str = None) -> str:
     """
     Save scan results to a file.
     
@@ -128,12 +151,33 @@ def save_results_to_file(results: Dict[str, Any], file_path: str = None, format_
         results: Scan results dictionary
         file_path: Path to save the file (if None, a default path will be generated)
         format_type: File format ('json', 'txt', or 'csv')
+        test_name: Name of the test (if provided, results will be saved in test directories)
         
     Returns:
         str: Path to the saved file
     """
-    if file_path is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    if test_name:
+        # Create test directories and save active/inactive IPs separately
+        active_dir, inactive_dir = create_test_directories(test_name)
+        
+        # Save active IPs
+        active_ips = results.get('active_ips', {}).get('ips', [])
+        if active_ips:
+            active_file = os.path.join(active_dir, f"active_ips_{timestamp}.{format_type}")
+            save_ip_list(active_ips, active_file, format_type, "active")
+        
+        # Save inactive IPs
+        inactive_ips = results.get('inactive_ips', {}).get('ips', [])
+        if inactive_ips:
+            inactive_file = os.path.join(inactive_dir, f"inactive_ips_{timestamp}.{format_type}")
+            save_ip_list(inactive_ips, inactive_file, format_type, "inactive")
+        
+        # Save complete results to the base directory
+        if file_path is None:
+            file_path = os.path.join("output", test_name, f"scan_results_{timestamp}.{format_type}")
+    elif file_path is None:
         file_path = f"scan_results_{timestamp}.{format_type}"
     
     directory = os.path.dirname(file_path)
@@ -155,6 +199,42 @@ def save_results_to_file(results: Dict[str, Any], file_path: str = None, format_
                 f.write(f"{ip},active\n")
             for ip in results.get('inactive_ips', {}).get('ips', []):
                 f.write(f"{ip},inactive\n")
+    else:
+        raise ValueError(f"Unsupported format type: {format_type}")
+    
+    return file_path
+
+
+def save_ip_list(ip_list: List[str], file_path: str, format_type: str, status: str) -> str:
+    """
+    Save a list of IPs to a file.
+    
+    Args:
+        ip_list: List of IP addresses
+        file_path: Path to save the file
+        format_type: File format ('json', 'txt', or 'csv')
+        status: Status of the IPs ('active' or 'inactive')
+        
+    Returns:
+        str: Path to the saved file
+    """
+    directory = os.path.dirname(file_path)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+    
+    if format_type == 'json':
+        with open(file_path, 'w') as f:
+            json.dump({"ips": ip_list, "status": status, "count": len(ip_list)}, f, indent=2)
+    elif format_type == 'txt':
+        with open(file_path, 'w') as f:
+            f.write(f"{status.upper()} IPs ({len(ip_list)}):\n")
+            for ip in ip_list:
+                f.write(f"{ip}\n")
+    elif format_type == 'csv':
+        with open(file_path, 'w') as f:
+            f.write("IP,Status\n")
+            for ip in ip_list:
+                f.write(f"{ip},{status}\n")
     else:
         raise ValueError(f"Unsupported format type: {format_type}")
     
