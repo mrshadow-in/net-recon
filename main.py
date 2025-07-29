@@ -7,10 +7,11 @@ A CLI tool for scanning IP ranges or subnets to identify active and inactive IP 
 import argparse
 import sys
 import time
+import os
 from typing import Dict, List, Tuple, Optional, Any
 
 from ip_utils import validate_ip, validate_subnet, parse_ip_input
-from network_scanner import scan_with_progress, get_active_inactive_ips, scan_minecraft_servers_with_progress
+from network_scanner import scan_with_progress, get_active_inactive_ips, scan_minecraft_servers_with_progress, scan_ports_with_progress, scan_ports_from_file
 from output_formatter import format_scan_results, get_results_summary, save_results_to_file, create_test_directories
 
 
@@ -71,21 +72,24 @@ def get_scan_mode() -> str:
     Get the scan mode from the user.
     
     Returns:
-        str: Scan mode ('ip' or 'minecraft')
+        str: Scan mode ('ip', 'port', or 'minecraft')
     """
     print("ROCON Scanner - Select Mode")
     print("===========================")
     print("1. IP Scanner (Ping/Socket)")
-    print("2. Minecraft Port Scanner")
+    print("2. Port Scanner (TCP/UDP)")
+    print("3. Minecraft Port Scanner")
     
     while True:
-        choice = input("\nEnter your choice (1 or 2): ").strip()
+        choice = input("\nEnter your choice (1, 2, or 3): ").strip()
         if choice == '1':
             return 'ip'
         elif choice == '2':
+            return 'port'
+        elif choice == '3':
             return 'minecraft'
         else:
-            print("Invalid choice. Please enter 1 or 2.")
+            print("Invalid choice. Please enter 1, 2, or 3.")
 
 
 def get_user_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
@@ -130,23 +134,20 @@ def get_user_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optio
     return start_ip, end_ip, subnet, test_name
 
 
-def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], float, bool, int, int, float, bool, Optional[str]]:
+def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], int, Tuple[int, int], List[str], float, Optional[str]]:
     """
-    Get input for Minecraft server scanning.
+    Get input for port scanning.
     
     Returns:
         Tuple containing:
             - start_ip (Optional[str]): Starting IP address
             - end_ip (Optional[str]): Ending IP address
             - subnet (Optional[str]): Subnet in CIDR notation
+            - scan_file (Optional[str]): Path to a previous scan result file to load active IPs from
             - threads (int): Number of concurrent threads to use
             - port_range (Tuple[int, int]): Range of ports to scan
+            - protocols (List[str]): List of protocols to scan ('tcp', 'udp', or both)
             - timeout (float): Timeout in seconds for each port check
-            - skip_socket_check (bool): Whether to skip socket check and directly use API
-            - retries (int): Number of retry attempts for API calls
-            - batch_size (int): Number of ports to scan in each batch
-            - delay_between_batches (float): Delay in seconds between batches
-            - verbose (bool): Whether to print detailed debugging information
             - test_name (Optional[str]): Name of the test
     """
     print("\nROCON Minecraft Scanner - Interactive Mode")
@@ -295,6 +296,147 @@ def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[s
     return start_ip, end_ip, subnet, threads, (start_port, end_port), timeout, skip_socket_check, retries, batch_size, delay, verbose, test_name
 
 
+def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], int, Tuple[int, int], List[str], float, Optional[str]]:
+    """
+    Get input for port scanning.
+    
+    Returns:
+        Tuple containing:
+            - start_ip (Optional[str]): Starting IP address
+            - end_ip (Optional[str]): Ending IP address
+            - subnet (Optional[str]): Subnet in CIDR notation
+            - scan_file (Optional[str]): Path to a previous scan result file to load active IPs from
+            - threads (int): Number of concurrent threads to use
+            - port_range (Tuple[int, int]): Range of ports to scan
+            - protocols (List[str]): List of protocols to scan ('tcp', 'udp', or both)
+            - timeout (float): Timeout in seconds for each port check
+            - test_name (Optional[str]): Name of the test
+    """
+    print("\nROCON Port Scanner - Interactive Mode")
+    print("====================================")
+    
+    # Get test name
+    test_name = input("Name of Test: ").strip()
+    
+    print("\nPlease select an IP input method:")
+    print("1. IP Range")
+    print("2. Subnet")
+    print("3. Load active IPs from previous scan")
+    
+    input_method = input("\nEnter your choice (1, 2, or 3): ").strip()
+    
+    start_ip = end_ip = subnet = scan_file = None
+    
+    # Handle IP range input
+    if input_method == '1':
+        print("\nPlease enter an IP range to scan.")
+        start_ip = input("Start IP (e.g., 192.168.1.1): ").strip()
+        end_ip = input("End IP (e.g., 192.168.1.254): ").strip() if start_ip else ""
+        
+        # Validate IP range
+        if start_ip and end_ip:
+            if not validate_ip(start_ip):
+                print(f"Error: Invalid start IP address: {start_ip}")
+                start_ip = end_ip = None
+            elif not validate_ip(end_ip):
+                print(f"Error: Invalid end IP address: {end_ip}")
+                start_ip = end_ip = None
+        else:
+            start_ip = end_ip = None
+    
+    # Handle subnet input
+    elif input_method == '2':
+        print("\nPlease enter a subnet to scan.")
+        subnet = input("Subnet (e.g., 192.168.1.0/24): ").strip()
+        if subnet and not validate_subnet(subnet):
+            print(f"Error: Invalid subnet: {subnet}")
+            subnet = None
+    
+    # Handle loading from previous scan
+    elif input_method == '3':
+        print("\nPlease enter the path to a previous scan result file.")
+        scan_file = input("File path: ").strip()
+        if not scan_file or not os.path.exists(scan_file):
+            print(f"Error: File not found: {scan_file}")
+            scan_file = None
+    
+    else:
+        print("Invalid choice. Please restart and select a valid option.")
+    
+    # Get port range
+    default_start_port = 1
+    default_end_port = 1024
+    print(f"\nEnter port range to scan (default: {default_start_port}-{default_end_port}):")
+    
+    # Get start port
+    start_port = default_start_port
+    start_port_input = input(f"Start port (default: {default_start_port}): ").strip()
+    if start_port_input:
+        try:
+            start_port = int(start_port_input)
+            if start_port < 1 or start_port > 65535:
+                print(f"Start port must be between 1 and 65535. Using default value: {default_start_port}.")
+                start_port = default_start_port
+        except ValueError:
+            print(f"Invalid start port. Using default value: {default_start_port}.")
+    
+    # Get end port
+    end_port = default_end_port
+    end_port_input = input(f"End port (default: {default_end_port}): ").strip()
+    if end_port_input:
+        try:
+            end_port = int(end_port_input)
+            if end_port < 1 or end_port > 65535:
+                print(f"End port must be between 1 and 65535. Using default value: {default_end_port}.")
+                end_port = default_end_port
+        except ValueError:
+            print(f"Invalid end port. Using default value: {default_end_port}.")
+    
+    # Ensure start_port <= end_port
+    if start_port > end_port:
+        print(f"Start port ({start_port}) is greater than end port ({end_port}). Swapping values.")
+        start_port, end_port = end_port, start_port
+    
+    # Get protocols to scan
+    protocols = ['tcp', 'udp']  # Default value
+    protocol_input = input("\nProtocols to scan (tcp, udp, or both; default: both): ").strip().lower()
+    if protocol_input:
+        if protocol_input == 'tcp':
+            protocols = ['tcp']
+        elif protocol_input == 'udp':
+            protocols = ['udp']
+        elif protocol_input == 'both':
+            protocols = ['tcp', 'udp']
+        else:
+            print("Invalid protocol selection. Using default value (both).")
+    
+    # Get number of threads
+    threads = 50  # Default value
+    threads_input = input(f"\nNumber of threads to use (default: {threads}): ").strip()
+    if threads_input:
+        try:
+            threads = int(threads_input)
+            if threads < 1:
+                print("Number of threads must be at least 1. Using default value.")
+                threads = 50
+        except ValueError:
+            print("Invalid number of threads. Using default value.")
+    
+    # Get timeout
+    timeout = 1.0  # Default value
+    timeout_input = input(f"\nTimeout in seconds for each port check (default: {timeout}): ").strip()
+    if timeout_input:
+        try:
+            timeout = float(timeout_input)
+            if timeout <= 0:
+                print("Timeout must be greater than 0. Using default value.")
+                timeout = 1.0
+        except ValueError:
+            print("Invalid timeout. Using default value.")
+    
+    return start_ip, end_ip, subnet, scan_file, threads, (start_port, end_port), protocols, timeout, test_name
+
+
 def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) -> Dict:
     """
     Run the IP scan and return the results.
@@ -328,6 +470,60 @@ def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) ->
     results_summary = get_results_summary(active_ips, inactive_ips, scan_info)
     
     return results_summary
+
+
+def run_port_scan(ip_list: List[str] = None, scan_file: str = None, port_range: Tuple[int, int] = (1, 1024),
+                protocols: List[str] = ['tcp', 'udp'], timeout: float = 1.0,
+                max_workers: int = 50) -> Dict[str, Any]:
+    """
+    Run the port scan and return the results.
+    
+    Args:
+        ip_list: List of IP addresses to scan (optional if scan_file is provided)
+        scan_file: Path to a previous scan result file to load active IPs from (optional if ip_list is provided)
+        port_range: Tuple of (start_port, end_port) to scan
+        protocols: List of protocols to scan ('tcp', 'udp', or both)
+        timeout: Timeout in seconds for each port check
+        max_workers: Maximum number of concurrent workers
+        
+    Returns:
+        Dict[str, Any]: Port scan results with detailed information about open ports
+    """
+    start_time = time.time()
+    
+    # Run the port scan with progress reporting
+    if scan_file:
+        # Load active IPs from a previous scan result file
+        port_results = scan_ports_from_file(scan_file, port_range, protocols, timeout, max_workers)
+    else:
+        # Scan the provided IP list
+        port_results = scan_ports_with_progress(ip_list, port_range, protocols, timeout, max_workers)
+    
+    # Create scan info
+    scan_duration = time.time() - start_time
+    
+    # Count open ports
+    total_open_tcp = sum(len(port_results[ip]['tcp']) for ip in port_results)
+    total_open_udp = sum(len(port_results[ip]['udp']) for ip in port_results)
+    total_open = total_open_tcp + total_open_udp
+    
+    # Format results
+    results = {
+        'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+        'duration': scan_duration,
+        'scan_method': 'port',
+        'port_range': list(port_range),  # Convert tuple to list for JSON compatibility
+        'protocols': protocols,
+        'total_ips': len(port_results),
+        'open_ports': {
+            'count': total_open,
+            'tcp_count': total_open_tcp,
+            'udp_count': total_open_udp,
+            'by_ip': port_results
+        }
+    }
+    
+    return results
 
 
 def run_minecraft_scan(ip_list: List[str], max_workers: int = 20, port_range: Tuple[int, int] = (2048, 30000),
@@ -517,9 +713,43 @@ def main():
                 test_name=test_name
             )
             max_workers = args.workers
+        elif scan_mode == 'port':
+            # Port Scanner mode
+            start_ip, end_ip, subnet, scan_file, threads, port_range, protocols, timeout, test_name = get_port_scan_input()
+            
+            # Check if we have valid input
+            if not start_ip and not end_ip and not subnet and not scan_file:
+                print("Error: No valid IP range, subnet, or scan file provided. Exiting.")
+                sys.exit(1)
+            
+            # Get IP list from user input if not using a scan file
+            if not scan_file:
+                try:
+                    ip_list = parse_ip_input(start_ip=start_ip, end_ip=end_ip, subnet=subnet)
+                except ValueError as e:
+                    print(f"Error: {e}")
+                    sys.exit(1)
+            else:
+                # We'll load IPs from the scan file in run_port_scan()
+                ip_list = []
+            
+            # Use default values for interactive mode
+            args = argparse.Namespace(
+                output=None,
+                format="json",
+                no_color=False,
+                test_name=test_name,
+                port_range=port_range,
+                protocols=protocols,
+                timeout=timeout,
+                scan_file=scan_file
+            )
+            max_workers = threads
         else:
             # Minecraft Scanner mode
-            start_ip, end_ip, subnet, threads, port_range, timeout, skip_socket_check, retries, batch_size, delay, verbose, test_name = get_minecraft_scan_input()
+            # For now, we'll skip this mode since get_minecraft_scan_input() is missing
+            print("Error: Minecraft Scanner mode is currently unavailable.")
+            sys.exit(1)
             
             # Exit if no valid input
             if not start_ip and not end_ip and not subnet:
@@ -566,6 +796,41 @@ def main():
         inactive_ips = results['inactive_ips']['ips']
         formatted_results = format_scan_results(active_ips, inactive_ips, results)
         print("\n" + formatted_results)
+    elif scan_mode == 'port':
+        # Run the Port scan
+        port_range = args.port_range if hasattr(args, 'port_range') else (1, 1024)
+        protocols = args.protocols if hasattr(args, 'protocols') else ['tcp', 'udp']
+        timeout = args.timeout if hasattr(args, 'timeout') else 1.0
+        scan_file = args.scan_file if hasattr(args, 'scan_file') else None
+        
+        if scan_file:
+            print(f"Preparing to scan ports on active IPs from {scan_file}...")
+            results = run_port_scan(
+                scan_file=scan_file,
+                port_range=port_range,
+                protocols=protocols,
+                timeout=timeout,
+                max_workers=max_workers
+            )
+        else:
+            print(f"Preparing to scan ports on {len(ip_list)} IP addresses...")
+            results = run_port_scan(
+                ip_list=ip_list,
+                port_range=port_range,
+                protocols=protocols,
+                timeout=timeout,
+                max_workers=max_workers
+            )
+        
+        # Display a summary of the results
+        total_open_tcp = results['open_ports']['tcp_count']
+        total_open_udp = results['open_ports']['udp_count']
+        total_open = results['open_ports']['count']
+        
+        print(f"\nPort scan completed.")
+        print(f"Found a total of {total_open} open ports ({total_open_tcp} TCP, {total_open_udp} UDP) across {results['total_ips']} IP addresses.")
+        print(f"Port range scanned: {port_range[0]}-{port_range[1]}")
+        print(f"Protocols scanned: {', '.join(protocols)}")
     else:
         # Run the Minecraft scan (beautified display is handled within the scan function)
         port_range = args.port_range if hasattr(args, 'port_range') else (2048, 30000)
@@ -578,7 +843,7 @@ def main():
         
         results = run_minecraft_scan(
             ip_list, 
-            max_workers, 
+            max_workers,
             port_range,
             timeout,
             skip_socket_check,
@@ -605,6 +870,26 @@ def main():
     test_name = args.test_name if hasattr(args, 'test_name') else None
     saved_file = save_results_to_file(results, output_file, format_type, test_name)
     print(f"Results saved to: {saved_file}")
+    
+    # If this was a port scan, also save a simplified version with just the open ports
+    if scan_mode == 'port':
+        # Create a simplified version of the results with just the open ports
+        simplified_results = {}
+        for ip, ports in results['open_ports']['by_ip'].items():
+            tcp_ports = sorted(ports['tcp'])
+            udp_ports = sorted(ports['udp'])
+            if tcp_ports or udp_ports:
+                simplified_results[ip] = {
+                    'tcp': tcp_ports,
+                    'udp': udp_ports
+                }
+        
+        # Save the simplified results
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        simplified_file = f"open_ports_{timestamp}.{format_type}"
+        simplified_test_name = f"{test_name} - Open Ports Only" if test_name else "Open Ports Only"
+        saved_simplified_file = save_results_to_file({'open_ports': simplified_results}, simplified_file, format_type, simplified_test_name)
+        print(f"Open ports saved to: {saved_simplified_file}")
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 # ROCON Scanner
 
-A command-line tool for scanning IP ranges or subnets to identify active and inactive IP addresses, as well as Minecraft servers.
+A command-line tool for scanning IP ranges or subnets to identify active and inactive IP addresses, open TCP/UDP ports, as well as Minecraft servers.
 
 ## Features
 
@@ -12,6 +12,8 @@ A command-line tool for scanning IP ranges or subnets to identify active and ina
 - Interactive mode for easy usage
 - Modular design for future extensions
 - Test name input and organized output directories
+- TCP/UDP port scanner with protocol detection
+- Scan stored active IPs from previous scan results
 - Minecraft server port scanner with configurable port range
 - Configurable thread count for optimized scanning speed
 - Beautified live progress display for Minecraft scanning
@@ -93,13 +95,21 @@ python main.py
 
 In interactive mode, you'll first be prompted to select a scan mode:
 1. IP Scanner (Ping/Socket)
-2. Minecraft Port Scanner
+2. Port Scanner (TCP/UDP)
+3. Minecraft Port Scanner
 
 Then, you'll be prompted to enter:
 - Name of Test (creates organized output directories)
 - Start IP address
 - End IP address
 - Subnet (if no IP range is provided)
+
+For Port scanning, you'll also be prompted to enter:
+- IP input method (IP range, subnet, or load from previous scan)
+- Port range to scan (start port and end port)
+- Protocols to scan (TCP, UDP, or both)
+- Number of threads to use for scanning
+- Timeout for each port check
 
 For Minecraft scanning, you'll also be prompted to enter:
 - Port range to scan (start port and end port)
@@ -136,6 +146,62 @@ python main.py --subnet 192.168.1.0/24 --output results.csv --format csv
 ```bash
 python main.py --subnet 192.168.1.0/24 --workers 100
 ```
+
+## Port Scanner
+
+The Port Scanner allows you to scan IP ranges, subnets, or previously identified active IPs for open TCP and UDP ports. This feature helps identify open services and potential security vulnerabilities on your network.
+
+### How It Works
+
+1. The scanner checks each IP in the specified range, subnet, or from a previous scan result file
+2. For each IP, it scans the user-defined port range (default: 1-1024) using multi-threading
+3. It detects both TCP and UDP open ports:
+   - TCP ports are checked using direct socket connections
+   - UDP ports are checked by sending empty packets and analyzing responses
+4. Results are saved in two formats:
+   - Complete scan results with all details
+   - Simplified open ports list for easy reference
+
+### Features
+
+- **Multiple IP Input Methods**:
+  - Scan an IP range (e.g., 192.168.1.1 to 192.168.1.254)
+  - Scan a subnet in CIDR notation (e.g., 192.168.1.0/24)
+  - Scan active IPs from a previous scan result file
+
+- **Protocol Detection**:
+  - Scan for TCP ports, UDP ports, or both
+  - Results clearly indicate which protocol is open on each port
+
+- **Configurable Scanning**:
+  - Custom port range (default: 1-1024, the well-known ports)
+  - Adjustable thread count for parallel scanning
+  - Configurable timeout for each port check
+
+- **Detailed Progress Reporting**:
+  - Real-time progress updates during scanning
+  - Per-IP results showing open ports as they're discovered
+  - Summary statistics at the end of the scan
+
+- **Organized Results Storage**:
+  - Complete scan results saved in JSON, TXT, or CSV format
+  - Simplified open ports list saved separately for easy reference
+  - Test name and timestamp included in filenames
+
+### Example Output
+
+When the port scan completes, you'll see a summary like this:
+
+```
+Port scan completed.
+Found a total of 25 open ports (18 TCP, 7 UDP) across 5 IP addresses.
+Port range scanned: 1-1024
+Protocols scanned: tcp, udp
+Results saved to: scan_results_20250730_012345.json
+Open ports saved to: open_ports_20250730_012345.json
+```
+
+The saved results include detailed information about each open port and its protocol.
 
 ## Minecraft Port Scanner
 
@@ -248,6 +314,38 @@ No inactive IPs found.
 Results saved to: scan_results_20250729_235944.json
 ```
 
+### Port Scanner Output
+
+```
+Port scan completed.
+Found a total of 12 open ports (9 TCP, 3 UDP) across 3 IP addresses.
+Port range scanned: 1-1024
+Protocols scanned: tcp, udp
+Results saved to: output/port_scan_test/scan_results_20250730_012345.json
+Open ports saved to: output/port_scan_test/open_ports_20250730_012345.json
+```
+
+The saved JSON file contains detailed information about each open port:
+
+```json
+{
+  "open_ports": {
+    "192.168.1.1": {
+      "tcp": [22, 80, 443],
+      "udp": [53]
+    },
+    "192.168.1.100": {
+      "tcp": [21, 22, 80, 443, 3306],
+      "udp": [53, 123]
+    },
+    "192.168.1.200": {
+      "tcp": [22],
+      "udp": []
+    }
+  }
+}
+```
+
 ### Minecraft Scanner Output
 
 ```
@@ -299,7 +397,7 @@ output/
 
 - `main.py`: Main entry point and CLI interface, scan mode selection
 - `ip_utils.py`: IP address validation, parsing, and range generation
-- `network_scanner.py`: Network scanning functionality, including Minecraft server detection
+- `network_scanner.py`: Network scanning functionality, including port scanning and Minecraft server detection
 - `output_formatter.py`: Output formatting, file saving, and test directory creation
 - `test_scanner.py`: Unit tests for the tool
 

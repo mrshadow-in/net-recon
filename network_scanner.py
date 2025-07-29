@@ -107,6 +107,232 @@ def get_active_inactive_ips(scan_results: Dict[str, bool]) -> Tuple[List[str], L
     return active_ips, inactive_ips
 
 
+def check_tcp_port(ip: str, port: int, timeout: float = 1.0) -> bool:
+    """
+    Check if a TCP port is open on the specified IP address.
+    
+    Args:
+        ip: IP address to check
+        port: Port number to check
+        timeout: Timeout in seconds
+        
+    Returns:
+        bool: True if port is open, False otherwise
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    
+    try:
+        result = sock.connect_ex((ip, port))
+        return result == 0
+    except Exception:
+        return False
+    finally:
+        sock.close()
+
+
+def check_udp_port(ip: str, port: int, timeout: float = 1.0) -> bool:
+    """
+    Check if a UDP port is open on the specified IP address.
+    
+    Args:
+        ip: IP address to check
+        port: Port number to check
+        timeout: Timeout in seconds
+        
+    Returns:
+        bool: True if port appears to be open, False otherwise
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    
+    try:
+        # Send empty UDP packet
+        sock.sendto(b'', (ip, port))
+        
+        # Try to receive data (will timeout if port is open and no response)
+        try:
+            sock.recvfrom(1024)
+            return True  # Received a response
+        except socket.timeout:
+            return True  # Timeout can indicate an open port with no response
+        except ConnectionRefusedError:
+            return False  # Port is closed
+    except Exception:
+        return False
+    finally:
+        sock.close()
+
+
+def scan_ports(ip: str, port_range: Tuple[int, int] = (1, 1024), 
+               protocols: List[str] = ['tcp', 'udp'], timeout: float = 1.0, 
+               max_workers: int = 50) -> Dict[str, List[int]]:
+    """
+    Scan a range of ports on an IP address for both TCP and UDP.
+    
+    Args:
+        ip: IP address to scan
+        port_range: Tuple of (start_port, end_port) to scan
+        protocols: List of protocols to scan ('tcp', 'udp', or both)
+        timeout: Timeout in seconds for each port check
+        max_workers: Maximum number of concurrent workers
+        
+    Returns:
+        Dict[str, List[int]]: Dictionary with protocol as key and list of open ports as value
+    """
+    start_port, end_port = port_range
+    ports_to_scan = range(start_port, end_port + 1)
+    results = {'tcp': [], 'udp': []}
+    
+    # Use ThreadPoolExecutor for parallel scanning
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Scan TCP ports if requested
+        if 'tcp' in protocols:
+            tcp_futures = {executor.submit(check_tcp_port, ip, port, timeout): port 
+                          for port in ports_to_scan}
+            
+            for future in tcp_futures:
+                port = tcp_futures[future]
+                try:
+                    if future.result():
+                        results['tcp'].append(port)
+                except Exception:
+                    pass
+        
+        # Scan UDP ports if requested
+        if 'udp' in protocols:
+            udp_futures = {executor.submit(check_udp_port, ip, port, timeout): port 
+                          for port in ports_to_scan}
+            
+            for future in udp_futures:
+                port = udp_futures[future]
+                try:
+                    if future.result():
+                        results['udp'].append(port)
+                except Exception:
+                    pass
+    
+    return results
+
+
+def scan_ports_with_progress(ip_list: List[str], port_range: Tuple[int, int] = (1, 1024),
+                            protocols: List[str] = ['tcp', 'udp'], timeout: float = 1.0,
+                            max_workers: int = 50) -> Dict[str, Dict[str, List[int]]]:
+    """
+    Scan a list of IP addresses for open ports with progress reporting.
+    
+    Args:
+        ip_list: List of IP addresses to scan
+        port_range: Tuple of (start_port, end_port) to scan
+        protocols: List of protocols to scan ('tcp', 'udp', or both)
+        timeout: Timeout in seconds for each port check
+        max_workers: Maximum number of concurrent workers
+        
+    Returns:
+        Dict[str, Dict[str, List[int]]]: Dictionary mapping IP addresses to their open ports by protocol
+    """
+    total_ips = len(ip_list)
+    results = {}
+    completed = 0
+    
+    print(f"Starting port scan of {total_ips} IP addresses...")
+    print(f"Port range: {port_range[0]}-{port_range[1]}, Protocols: {', '.join(protocols)}")
+    start_time = time.time()
+    
+    # Process IPs one by one to show progress
+    for ip in ip_list:
+        ip_start_time = time.time()
+        print(f"\nScanning {ip}...")
+        
+        # Scan ports for this IP
+        port_results = scan_ports(ip, port_range, protocols, timeout, max_workers)
+        results[ip] = port_results
+        
+        # Count open ports
+        open_tcp = len(port_results['tcp'])
+        open_udp = len(port_results['udp'])
+        total_open = open_tcp + open_udp
+        
+        # Report results for this IP
+        ip_elapsed = time.time() - ip_start_time
+        print(f"  Found {total_open} open ports on {ip} ({open_tcp} TCP, {open_udp} UDP) in {ip_elapsed:.2f} seconds")
+        
+        # Show some of the open ports
+        if open_tcp > 0:
+            tcp_ports = sorted(port_results['tcp'])
+            tcp_display = tcp_ports[:10]
+            if len(tcp_ports) > 10:
+                tcp_display_str = f"{tcp_display} and {len(tcp_ports) - 10} more"
+            else:
+                tcp_display_str = f"{tcp_display}"
+            print(f"  Open TCP ports: {tcp_display_str}")
+        
+        if open_udp > 0:
+            udp_ports = sorted(port_results['udp'])
+            udp_display = udp_ports[:10]
+            if len(udp_ports) > 10:
+                udp_display_str = f"{udp_display} and {len(udp_ports) - 10} more"
+            else:
+                udp_display_str = f"{udp_display}"
+            print(f"  Open UDP ports: {udp_display_str}")
+        
+        # Update overall progress
+        completed += 1
+        progress = (completed / total_ips) * 100
+        elapsed = time.time() - start_time
+        remaining = (elapsed / completed) * (total_ips - completed) if completed > 0 else 0
+        
+        print(f"Overall progress: {completed}/{total_ips} IPs scanned ({progress:.1f}%)")
+        print(f"Time elapsed: {elapsed:.1f}s, Estimated time remaining: {remaining:.1f}s")
+    
+    total_time = time.time() - start_time
+    print(f"\nPort scan completed in {total_time:.2f} seconds.")
+    
+    # Count total open ports across all IPs
+    total_open_tcp = sum(len(results[ip]['tcp']) for ip in results)
+    total_open_udp = sum(len(results[ip]['udp']) for ip in results)
+    total_open = total_open_tcp + total_open_udp
+    
+    print(f"Found a total of {total_open} open ports ({total_open_tcp} TCP, {total_open_udp} UDP) across {total_ips} IP addresses.")
+    
+    return results
+
+
+def scan_ports_from_file(file_path: str, port_range: Tuple[int, int] = (1, 1024),
+                         protocols: List[str] = ['tcp', 'udp'], timeout: float = 1.0,
+                         max_workers: int = 50) -> Dict[str, Dict[str, List[int]]]:
+    """
+    Scan IP addresses from a previous scan result file for open ports.
+    
+    Args:
+        file_path: Path to the scan result file (JSON format)
+        port_range: Tuple of (start_port, end_port) to scan
+        protocols: List of protocols to scan ('tcp', 'udp', or both)
+        timeout: Timeout in seconds for each port check
+        max_workers: Maximum number of concurrent workers
+        
+    Returns:
+        Dict[str, Dict[str, List[int]]]: Dictionary mapping IP addresses to their open ports by protocol
+    """
+    try:
+        with open(file_path, 'r') as f:
+            scan_data = json.load(f)
+        
+        # Extract active IPs from the scan results
+        if 'active_ips' in scan_data and 'ips' in scan_data['active_ips']:
+            active_ips = scan_data['active_ips']['ips']
+            print(f"Loaded {len(active_ips)} active IPs from {file_path}")
+            
+            # Scan the active IPs for open ports
+            return scan_ports_with_progress(active_ips, port_range, protocols, timeout, max_workers)
+        else:
+            print(f"Error: Could not find active IPs in the scan result file: {file_path}")
+            return {}
+    except Exception as e:
+        print(f"Error loading scan results from {file_path}: {e}")
+        return {}
+
+
 def scan_with_progress(ip_list: List[str], method: str = 'ping', max_workers: int = 50) -> Dict[str, bool]:
     """
     Scan a list of IP addresses with progress reporting.
