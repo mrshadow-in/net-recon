@@ -217,7 +217,7 @@ def scan_ports(ip: str, port_range: Tuple[int, int] = (1, 1024),
 
 def scan_ports_with_progress(ip_list: List[str], port_range: Tuple[int, int] = (1, 1024),
                             protocols: List[str] = ['tcp', 'udp'], timeout: float = 1.0,
-                            max_workers: int = 50) -> Dict[str, Dict[str, List[int]]]:
+                            max_workers: int = 50, verbose: bool = False) -> Dict[str, Dict[str, List[int]]]:
     """
     Scan a list of IP addresses for open ports with progress reporting.
     
@@ -227,22 +227,81 @@ def scan_ports_with_progress(ip_list: List[str], port_range: Tuple[int, int] = (
         protocols: List of protocols to scan ('tcp', 'udp', or both)
         timeout: Timeout in seconds for each port check
         max_workers: Maximum number of concurrent workers
+        verbose: Whether to print detailed information
         
     Returns:
         Dict[str, Dict[str, List[int]]]: Dictionary mapping IP addresses to their open ports by protocol
     """
+    # ANSI color codes
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    BOLD = '\033[1m'
+    RESET = '\033[0m'
+    
     total_ips = len(ip_list)
     results = {}
     completed = 0
+    total_open_ports = 0
     
-    print(f"Starting port scan of {total_ips} IP addresses...")
-    print(f"Port range: {port_range[0]}-{port_range[1]}, Protocols: {', '.join(protocols)}")
+    # Calculate total ports to scan
+    total_ports_per_ip = port_range[1] - port_range[0] + 1
+    
+    # Print header with fixed information
+    print(f"{BOLD}╔══════════════════════════════════════════════════════════════╗{RESET}")
+    print(f"{BOLD}║                 ROCON PORT SCANNER                           ║{RESET}")
+    print(f"{BOLD}╚══════════════════════════════════════════════════════════════╝{RESET}")
+    print(f"{BLUE}• Target:{RESET} {total_ips} IP addresses")
+    print(f"{BLUE}• Port Range:{RESET} {port_range[0]}-{port_range[1]} ({total_ports_per_ip} ports per IP)")
+    print(f"{BLUE}• Protocols:{RESET} {', '.join(protocols)}")
+    print(f"{BLUE}• Threads:{RESET} {max_workers}")
+    print(f"{BLUE}• Timeout:{RESET} {timeout}s")
+    print()
+    
+    # Print initial progress display
+    print(f"{BOLD}IP Scan Progress:{RESET}")
+    print(render_progress_bar(0))
+    print(f"{YELLOW}Current IP:{RESET} Waiting to start...")
+    print(f"{YELLOW}Status:{RESET} Initializing...")
+    print(f"{YELLOW}Stats:{RESET} 0/{total_ips} IPs completed (0%) | Elapsed: 0s | ETA: N/A")
+    print(f"{YELLOW}Open Ports:{RESET} 0 (0 TCP, 0 UDP)")
+    
     start_time = time.time()
     
     # Process IPs one by one to show progress
-    for ip in ip_list:
+    for ip_index, ip in enumerate(ip_list):
         ip_start_time = time.time()
-        print(f"\nScanning {ip}...")
+        
+        # Update progress display for new IP
+        progress = ip_index / total_ips
+        elapsed = time.time() - start_time
+        
+        # Calculate ETA
+        if ip_index > 0:
+            eta = (elapsed / ip_index) * (total_ips - ip_index)
+            eta_str = format_time(eta)
+        else:
+            eta_str = "Calculating..."
+        
+        # Clear previous progress display (6 lines)
+        print("\033[6A\033[J", end="")
+        
+        # Update progress display
+        print(f"{BOLD}IP Scan Progress:{RESET}")
+        print(render_progress_bar(progress))
+        print(f"{YELLOW}Current IP:{RESET} {ip} ({ip_index+1}/{total_ips})")
+        print(f"{YELLOW}Status:{RESET} Scanning ports...")
+        print(f"{YELLOW}Stats:{RESET} {ip_index}/{total_ips} IPs completed ({progress*100:.1f}%) | Elapsed: {format_time(elapsed)} | ETA: {eta_str}")
+        print(f"{YELLOW}Open Ports:{RESET} {total_open_ports} total")
+        
+        if verbose:
+            print(f"\nDetailed scan of {ip}:")
+            print(f"  Port range: {port_range[0]}-{port_range[1]}")
+            print(f"  Protocols: {', '.join(protocols)}")
+            print(f"  Timeout: {timeout}s")
+            print(f"  Threads: {max_workers}")
         
         # Scan ports for this IP
         port_results = scan_ports(ip, port_range, protocols, timeout, max_workers)
@@ -252,55 +311,106 @@ def scan_ports_with_progress(ip_list: List[str], port_range: Tuple[int, int] = (
         open_tcp = len(port_results['tcp'])
         open_udp = len(port_results['udp'])
         total_open = open_tcp + open_udp
+        total_open_ports += total_open
         
         # Report results for this IP
         ip_elapsed = time.time() - ip_start_time
-        print(f"  Found {total_open} open ports on {ip} ({open_tcp} TCP, {open_udp} UDP) in {ip_elapsed:.2f} seconds")
         
-        # Show some of the open ports
-        if open_tcp > 0:
-            tcp_ports = sorted(port_results['tcp'])
-            tcp_display = tcp_ports[:10]
-            if len(tcp_ports) > 10:
-                tcp_display_str = f"{tcp_display} and {len(tcp_ports) - 10} more"
-            else:
-                tcp_display_str = f"{tcp_display}"
-            print(f"  Open TCP ports: {tcp_display_str}")
-        
-        if open_udp > 0:
-            udp_ports = sorted(port_results['udp'])
-            udp_display = udp_ports[:10]
-            if len(udp_ports) > 10:
-                udp_display_str = f"{udp_display} and {len(udp_ports) - 10} more"
-            else:
-                udp_display_str = f"{udp_display}"
-            print(f"  Open UDP ports: {udp_display_str}")
+        if verbose:
+            print(f"  Scan completed in {ip_elapsed:.2f} seconds")
+            print(f"  Found {total_open} open ports ({open_tcp} TCP, {open_udp} UDP)")
+            
+            # Show open ports
+            if open_tcp > 0:
+                tcp_ports = sorted(port_results['tcp'])
+                print(f"  Open TCP ports: {tcp_ports}")
+            
+            if open_udp > 0:
+                udp_ports = sorted(port_results['udp'])
+                print(f"  Open UDP ports: {udp_ports}")
         
         # Update overall progress
-        completed += 1
-        progress = (completed / total_ips) * 100
+        completed = ip_index + 1
+        progress = completed / total_ips
         elapsed = time.time() - start_time
+        
+        # Calculate scan rate and ETA
+        scan_rate = completed / elapsed if elapsed > 0 else 0
         remaining = (elapsed / completed) * (total_ips - completed) if completed > 0 else 0
         
-        print(f"Overall progress: {completed}/{total_ips} IPs scanned ({progress:.1f}%)")
-        print(f"Time elapsed: {elapsed:.1f}s, Estimated time remaining: {remaining:.1f}s")
+        # Clear previous progress display (6 lines)
+        if verbose:
+            # If verbose, we need to clear all the detailed output lines too
+            # Count how many lines we printed for verbose output
+            verbose_lines = 4  # Basic info
+            if open_tcp > 0:
+                verbose_lines += 1
+            if open_udp > 0:
+                verbose_lines += 1
+            print(f"\033[{verbose_lines}A\033[J", end="")
+        
+        # Clear previous progress display (6 lines)
+        print("\033[6A\033[J", end="")
+        
+        # Update progress display
+        print(f"{BOLD}IP Scan Progress:{RESET}")
+        print(render_progress_bar(progress))
+        print(f"{YELLOW}Current IP:{RESET} {ip} ({ip_index+1}/{total_ips})")
+        
+        if total_open > 0:
+            status_color = GREEN
+            status_text = f"Found {total_open} open ports!"
+        else:
+            status_color = RED
+            status_text = "No open ports found"
+        
+        print(f"{YELLOW}Status:{RESET} {status_color}{status_text}{RESET}")
+        print(f"{YELLOW}Stats:{RESET} {completed}/{total_ips} IPs completed ({progress*100:.1f}%) | Elapsed: {format_time(elapsed)} | ETA: {format_time(remaining)}")
+        print(f"{YELLOW}Open Ports:{RESET} {total_open_ports} total ({sum(len(results[ip]['tcp']) for ip in results)} TCP, {sum(len(results[ip]['udp']) for ip in results)} UDP)")
     
+    # Final update
     total_time = time.time() - start_time
-    print(f"\nPort scan completed in {total_time:.2f} seconds.")
+    
+    # Clear previous progress display (6 lines)
+    print("\033[6A\033[J", end="")
+    
+    # Update progress display with completion status
+    print(f"{BOLD}IP Scan Progress:{RESET}")
+    print(render_progress_bar(1.0))
+    print(f"{YELLOW}Current IP:{RESET} Complete")
+    print(f"{GREEN}Status:{RESET} Scan completed!")
+    print(f"{YELLOW}Stats:{RESET} {total_ips}/{total_ips} IPs completed (100%) | Total time: {format_time(total_time)}")
     
     # Count total open ports across all IPs
     total_open_tcp = sum(len(results[ip]['tcp']) for ip in results)
     total_open_udp = sum(len(results[ip]['udp']) for ip in results)
     total_open = total_open_tcp + total_open_udp
     
+    print(f"{YELLOW}Open Ports:{RESET} {total_open} total ({total_open_tcp} TCP, {total_open_udp} UDP)")
+    
+    # Print summary
+    print(f"\n{GREEN}Port scan completed in {total_time:.2f} seconds.{RESET}")
     print(f"Found a total of {total_open} open ports ({total_open_tcp} TCP, {total_open_udp} UDP) across {total_ips} IP addresses.")
+    
+    # If verbose, print a detailed summary of open ports by IP
+    if verbose and total_open > 0:
+        print("\nDetailed summary of open ports by IP:")
+        for ip, ports in results.items():
+            tcp_ports = sorted(ports['tcp'])
+            udp_ports = sorted(ports['udp'])
+            if tcp_ports or udp_ports:
+                print(f"\n{BOLD}{ip}:{RESET}")
+                if tcp_ports:
+                    print(f"  TCP: {tcp_ports}")
+                if udp_ports:
+                    print(f"  UDP: {udp_ports}")
     
     return results
 
 
 def scan_ports_from_file(file_path: str, port_range: Tuple[int, int] = (1, 1024),
                          protocols: List[str] = ['tcp', 'udp'], timeout: float = 1.0,
-                         max_workers: int = 50) -> Dict[str, Dict[str, List[int]]]:
+                         max_workers: int = 50, verbose: bool = False) -> Dict[str, Dict[str, List[int]]]:
     """
     Scan IP addresses from a previous scan result file for open ports.
     
@@ -310,6 +420,7 @@ def scan_ports_from_file(file_path: str, port_range: Tuple[int, int] = (1, 1024)
         protocols: List of protocols to scan ('tcp', 'udp', or both)
         timeout: Timeout in seconds for each port check
         max_workers: Maximum number of concurrent workers
+        verbose: Whether to print detailed information
         
     Returns:
         Dict[str, Dict[str, List[int]]]: Dictionary mapping IP addresses to their open ports by protocol
@@ -323,8 +434,16 @@ def scan_ports_from_file(file_path: str, port_range: Tuple[int, int] = (1, 1024)
             active_ips = scan_data['active_ips']['ips']
             print(f"Loaded {len(active_ips)} active IPs from {file_path}")
             
+            if verbose:
+                print(f"Scan file details:")
+                print(f"  Timestamp: {scan_data.get('timestamp', 'Unknown')}")
+                print(f"  Scan method: {scan_data.get('scan_method', 'Unknown')}")
+                print(f"  Total IPs in original scan: {scan_data.get('total_ips', 'Unknown')}")
+                print(f"  Active IPs: {len(active_ips)}")
+                print()
+            
             # Scan the active IPs for open ports
-            return scan_ports_with_progress(active_ips, port_range, protocols, timeout, max_workers)
+            return scan_ports_with_progress(active_ips, port_range, protocols, timeout, max_workers, verbose)
         else:
             print(f"Error: Could not find active IPs in the scan result file: {file_path}")
             return {}
@@ -333,7 +452,7 @@ def scan_ports_from_file(file_path: str, port_range: Tuple[int, int] = (1, 1024)
         return {}
 
 
-def scan_with_progress(ip_list: List[str], method: str = 'ping', max_workers: int = 50) -> Dict[str, bool]:
+def scan_with_progress(ip_list: List[str], method: str = 'ping', max_workers: int = 50, verbose: bool = False) -> Dict[str, bool]:
     """
     Scan a list of IP addresses with progress reporting.
     
@@ -341,32 +460,107 @@ def scan_with_progress(ip_list: List[str], method: str = 'ping', max_workers: in
         ip_list: List of IP addresses to scan
         method: Scanning method ('ping' or 'socket')
         max_workers: Maximum number of concurrent workers
+        verbose: Whether to print detailed information
         
     Returns:
         Dict[str, bool]: Dictionary mapping IP addresses to their active status
     """
+    # ANSI color codes
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    BOLD = '\033[1m'
+    RESET = '\033[0m'
+    
     total_ips = len(ip_list)
     results = {}
     completed = 0
     
-    print(f"Starting scan of {total_ips} IP addresses...")
+    # Print header with fixed information
+    print(f"{BOLD}╔══════════════════════════════════════════════════════════════╗{RESET}")
+    print(f"{BOLD}║                   ROCON IP SCANNER                           ║{RESET}")
+    print(f"{BOLD}╚══════════════════════════════════════════════════════════════╝{RESET}")
+    print(f"{BLUE}• Target:{RESET} {total_ips} IP addresses")
+    print(f"{BLUE}• Method:{RESET} {method}")
+    print(f"{BLUE}• Threads:{RESET} {max_workers}")
+    print()
+    
+    # Print initial progress display
+    print(f"{BOLD}Scan Progress:{RESET}")
+    print(render_progress_bar(0))
+    print(f"{YELLOW}Status:{RESET} Initializing...")
+    print(f"{YELLOW}Stats:{RESET} 0/{total_ips} IPs completed (0%) | Elapsed: 0s | ETA: N/A")
+    
     start_time = time.time()
+    last_update_time = start_time
     
     # Process IPs in batches to show progress
     batch_size = max(1, min(max_workers, total_ips // 10))
     for i in range(0, total_ips, batch_size):
         batch = ip_list[i:i+batch_size]
+        
+        if verbose:
+            print(f"\nScanning batch of {len(batch)} IPs ({i+1}-{min(i+batch_size, total_ips)} of {total_ips})...")
+            
         batch_results = scan_ips(batch, method, max_workers)
         results.update(batch_results)
         
         completed += len(batch)
-        progress = (completed / total_ips) * 100
+        progress = completed / total_ips
         elapsed = time.time() - start_time
         
-        print(f"Progress: {completed}/{total_ips} IPs scanned ({progress:.1f}%) - Time elapsed: {elapsed:.1f}s")
+        # Only update the display if at least 0.5 seconds have passed since the last update
+        # or if this is the last batch, to avoid excessive terminal updates
+        current_time = time.time()
+        if current_time - last_update_time >= 0.5 or completed == total_ips:
+            last_update_time = current_time
+            
+            # Calculate ETA
+            if completed > 0:
+                eta = (elapsed / completed) * (total_ips - completed)
+                eta_str = format_time(eta)
+            else:
+                eta_str = "N/A"
+            
+            # Calculate scan rate
+            scan_rate = completed / elapsed if elapsed > 0 else 0
+            
+            # Clear previous progress display (5 lines)
+            print("\033[5A\033[J", end="")
+            
+            # Update progress display
+            print(f"{BOLD}Scan Progress:{RESET}")
+            print(render_progress_bar(progress))
+            print(f"{YELLOW}Status:{RESET} Scanning...")
+            print(f"{YELLOW}Stats:{RESET} {completed}/{total_ips} IPs completed ({progress*100:.1f}%) | Elapsed: {format_time(elapsed)} | ETA: {eta_str}")
+            print(f"{YELLOW}Rate:{RESET} {scan_rate:.1f} IPs/second")
+            
+            if verbose:
+                # Count active and inactive IPs so far
+                active_count = sum(1 for status in results.values() if status)
+                inactive_count = sum(1 for status in results.values() if not status)
+                print(f"{YELLOW}Results so far:{RESET} {active_count} active, {inactive_count} inactive")
     
+    # Final update
     total_time = time.time() - start_time
-    print(f"Scan completed in {total_time:.2f} seconds.")
+    
+    # Clear previous progress display (5 lines, or 6 if verbose)
+    print("\033[5A\033[J", end="")
+    if verbose:
+        print("\033[1A\033[J", end="")
+    
+    # Update progress display with completion status
+    print(f"{BOLD}Scan Progress:{RESET}")
+    print(render_progress_bar(1.0))
+    print(f"{GREEN}Status:{RESET} Completed!")
+    print(f"{YELLOW}Stats:{RESET} {total_ips}/{total_ips} IPs completed (100%) | Total time: {format_time(total_time)}")
+    print(f"{YELLOW}Rate:{RESET} {total_ips/total_time:.1f} IPs/second")
+    
+    # Count final active and inactive IPs
+    active_count = sum(1 for status in results.values() if status)
+    inactive_count = sum(1 for status in results.values() if not status)
+    print(f"\n{GREEN}Scan completed in {total_time:.2f} seconds.{RESET}")
+    print(f"Found {active_count} active IPs and {inactive_count} inactive IPs.")
     
     return results
 

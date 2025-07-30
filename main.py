@@ -63,6 +63,10 @@ def parse_arguments() -> argparse.Namespace:
         "--no-color", action="store_true",
         help="Disable colored output in the console"
     )
+    output_group.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Enable verbose output with detailed information"
+    )
     
     return parser.parse_args()
 
@@ -92,18 +96,22 @@ def get_scan_mode() -> str:
             print("Invalid choice. Please enter 1, 2, or 3.")
 
 
-def get_user_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+def get_user_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], bool]:
     """
     Get IP range or subnet input from the user interactively for IP scanning.
     
     Returns:
-        Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]: (start_ip, end_ip, subnet, test_name)
+        Tuple[Optional[str], Optional[str], Optional[str], Optional[str], bool]: (start_ip, end_ip, subnet, test_name, verbose)
     """
     print("\nROCON IP Scanner - Interactive Mode")
     print("===================================")
     
     # Get test name
     test_name = input("Name of Test: ").strip()
+    
+    # Get verbose option
+    verbose_input = input("Enable verbose output with detailed information? (y/n, default: n): ").strip().lower()
+    verbose = verbose_input and verbose_input[0] == 'y'
     
     print("\nPlease enter either an IP range or a subnet to scan.")
     print("Leave blank and press Enter to skip an input method.\n")
@@ -131,23 +139,26 @@ def get_user_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optio
             print(f"Error: Invalid subnet: {subnet}")
             subnet = None
     
-    return start_ip, end_ip, subnet, test_name
+    return start_ip, end_ip, subnet, test_name, verbose
 
 
-def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], int, Tuple[int, int], List[str], float, Optional[str]]:
+def get_minecraft_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], int, Tuple[int, int], float, bool, int, int, float, bool, Optional[str]]:
     """
-    Get input for port scanning.
+    Get input for Minecraft server scanning.
     
     Returns:
         Tuple containing:
             - start_ip (Optional[str]): Starting IP address
             - end_ip (Optional[str]): Ending IP address
             - subnet (Optional[str]): Subnet in CIDR notation
-            - scan_file (Optional[str]): Path to a previous scan result file to load active IPs from
             - threads (int): Number of concurrent threads to use
             - port_range (Tuple[int, int]): Range of ports to scan
-            - protocols (List[str]): List of protocols to scan ('tcp', 'udp', or both)
             - timeout (float): Timeout in seconds for each port check
+            - skip_socket_check (bool): Whether to skip socket check and directly use API
+            - retries (int): Number of retry attempts for API calls
+            - batch_size (int): Number of ports to scan in each batch
+            - delay_between_batches (float): Delay in seconds between batches
+            - verbose (bool): Whether to print detailed information
             - test_name (Optional[str]): Name of the test
     """
     print("\nROCON Minecraft Scanner - Interactive Mode")
@@ -155,6 +166,13 @@ def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], 
     
     # Get test name
     test_name = input("Name of Test: ").strip()
+    
+    # Get verbose option
+    verbose_input = input("Enable verbose output with detailed information? (y/n, default: n): ").strip().lower()
+    verbose = verbose_input and verbose_input[0] == 'y'
+    
+    if verbose:
+        print("\nVerbose mode enabled. Detailed information will be displayed during scanning.")
     
     print("\nPlease enter either an IP range or a subnet to scan for Minecraft servers.")
     print("Leave blank and press Enter to skip an input method.\n")
@@ -296,7 +314,7 @@ def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], 
     return start_ip, end_ip, subnet, threads, (start_port, end_port), timeout, skip_socket_check, retries, batch_size, delay, verbose, test_name
 
 
-def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], int, Tuple[int, int], List[str], float, Optional[str]]:
+def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], int, Tuple[int, int], List[str], float, Optional[str], bool]:
     """
     Get input for port scanning.
     
@@ -311,12 +329,20 @@ def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], 
             - protocols (List[str]): List of protocols to scan ('tcp', 'udp', or both)
             - timeout (float): Timeout in seconds for each port check
             - test_name (Optional[str]): Name of the test
+            - verbose (bool): Whether to print detailed information
     """
     print("\nROCON Port Scanner - Interactive Mode")
     print("====================================")
     
     # Get test name
     test_name = input("Name of Test: ").strip()
+    
+    # Get verbose option
+    verbose_input = input("Enable verbose output with detailed information? (y/n, default: n): ").strip().lower()
+    verbose = verbose_input and verbose_input[0] == 'y'
+    
+    if verbose:
+        print("\nVerbose mode enabled. Detailed information will be displayed during scanning.")
     
     print("\nPlease select an IP input method:")
     print("1. IP Range")
@@ -434,10 +460,10 @@ def get_port_scan_input() -> Tuple[Optional[str], Optional[str], Optional[str], 
         except ValueError:
             print("Invalid timeout. Using default value.")
     
-    return start_ip, end_ip, subnet, scan_file, threads, (start_port, end_port), protocols, timeout, test_name
+    return start_ip, end_ip, subnet, scan_file, threads, (start_port, end_port), protocols, timeout, test_name, verbose
 
 
-def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) -> Dict:
+def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50, verbose: bool = False) -> Dict:
     """
     Run the IP scan and return the results.
     
@@ -445,6 +471,7 @@ def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) ->
         ip_list: List of IP addresses to scan
         method: Scanning method ('ping' or 'socket')
         max_workers: Maximum number of concurrent workers
+        verbose: Whether to print detailed information
         
     Returns:
         Dict: Scan results summary
@@ -452,7 +479,7 @@ def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) ->
     start_time = time.time()
     
     # Run the scan with progress reporting
-    scan_results = scan_with_progress(ip_list, method, max_workers)
+    scan_results = scan_with_progress(ip_list, method, max_workers, verbose)
     
     # Get active and inactive IPs
     active_ips, inactive_ips = get_active_inactive_ips(scan_results)
@@ -474,7 +501,7 @@ def run_scan(ip_list: List[str], method: str = "ping", max_workers: int = 50) ->
 
 def run_port_scan(ip_list: List[str] = None, scan_file: str = None, port_range: Tuple[int, int] = (1, 1024),
                 protocols: List[str] = ['tcp', 'udp'], timeout: float = 1.0,
-                max_workers: int = 50) -> Dict[str, Any]:
+                max_workers: int = 50, verbose: bool = False) -> Dict[str, Any]:
     """
     Run the port scan and return the results.
     
@@ -485,6 +512,7 @@ def run_port_scan(ip_list: List[str] = None, scan_file: str = None, port_range: 
         protocols: List of protocols to scan ('tcp', 'udp', or both)
         timeout: Timeout in seconds for each port check
         max_workers: Maximum number of concurrent workers
+        verbose: Whether to print detailed information
         
     Returns:
         Dict[str, Any]: Port scan results with detailed information about open ports
@@ -494,10 +522,10 @@ def run_port_scan(ip_list: List[str] = None, scan_file: str = None, port_range: 
     # Run the port scan with progress reporting
     if scan_file:
         # Load active IPs from a previous scan result file
-        port_results = scan_ports_from_file(scan_file, port_range, protocols, timeout, max_workers)
+        port_results = scan_ports_from_file(scan_file, port_range, protocols, timeout, max_workers, verbose)
     else:
         # Scan the provided IP list
-        port_results = scan_ports_with_progress(ip_list, port_range, protocols, timeout, max_workers)
+        port_results = scan_ports_with_progress(ip_list, port_range, protocols, timeout, max_workers, verbose)
     
     # Create scan info
     scan_duration = time.time() - start_time
@@ -689,7 +717,7 @@ def main():
         
         if scan_mode == 'ip':
             # IP Scanner mode
-            start_ip, end_ip, subnet, test_name = get_user_input()
+            start_ip, end_ip, subnet, test_name, verbose = get_user_input()
             
             # Exit if no valid input
             if not start_ip and not end_ip and not subnet:
@@ -710,12 +738,13 @@ def main():
                 output=None,
                 format="json",
                 no_color=False,
-                test_name=test_name
+                test_name=test_name,
+                verbose=verbose
             )
             max_workers = args.workers
         elif scan_mode == 'port':
             # Port Scanner mode
-            start_ip, end_ip, subnet, scan_file, threads, port_range, protocols, timeout, test_name = get_port_scan_input()
+            start_ip, end_ip, subnet, scan_file, threads, port_range, protocols, timeout, test_name, verbose = get_port_scan_input()
             
             # Check if we have valid input
             if not start_ip and not end_ip and not subnet and not scan_file:
@@ -742,7 +771,8 @@ def main():
                 port_range=port_range,
                 protocols=protocols,
                 timeout=timeout,
-                scan_file=scan_file
+                scan_file=scan_file,
+                verbose=verbose
             )
             max_workers = threads
         else:
@@ -789,7 +819,8 @@ def main():
         print(f"Preparing to scan {len(ip_list)} IP addresses...")
         
         # Run the IP scan
-        results = run_scan(ip_list, args.method if hasattr(args, 'method') else "ping", max_workers)
+        verbose = args.verbose if hasattr(args, 'verbose') else False
+        results = run_scan(ip_list, args.method if hasattr(args, 'method') else "ping", max_workers, verbose)
         
         # Display results
         active_ips = results['active_ips']['ips']
