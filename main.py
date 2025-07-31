@@ -777,9 +777,7 @@ def main():
             max_workers = threads
         else:
             # Minecraft Scanner mode
-            # For now, we'll skip this mode since get_minecraft_scan_input() is missing
-            print("Error: Minecraft Scanner mode is currently unavailable.")
-            sys.exit(1)
+            start_ip, end_ip, subnet, threads, port_range, timeout, skip_socket_check, retries, batch_size, delay_between_batches, verbose, test_name = get_minecraft_scan_input()
             
             # Exit if no valid input
             if not start_ip and not end_ip and not subnet:
@@ -804,7 +802,7 @@ def main():
                 skip_socket_check=skip_socket_check,
                 retries=retries,
                 batch_size=batch_size,
-                delay_between_batches=delay,
+                delay_between_batches=delay_between_batches,
                 verbose=verbose
             )
             max_workers = threads
