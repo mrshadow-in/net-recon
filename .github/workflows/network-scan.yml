@@ -1,0 +1,132 @@
+name: ROCON Network Scanner
+
+on:
+  workflow_dispatch:
+    inputs:
+      scan_mode:
+        description: 'Scan Mode'
+        required: true
+        default: 'ip'
+        type: choice
+        options:
+          - ip
+          - port
+          - subnet_ip
+      target:
+        description: 'Target (IP range like "192.168.1.1 192.168.1.10" or subnet like "192.168.1.0/24")'
+        required: true
+        default: '127.0.0.1/30'
+      scan_method:
+        description: 'Scanning Method'
+        required: true
+        default: 'ping'
+        type: choice
+        options:
+          - ping
+          - socket
+      workers:
+        description: 'Number of concurrent workers'
+        required: false
+        default: '50'
+      output_format:
+        description: 'Output format'
+        required: false
+        default: 'json'
+        type: choice
+        options:
+          - json
+          - txt
+          - csv
+      port_range:
+        description: 'Port range for port scanning (e.g., "1 1024")'
+        required: false
+        default: '1 1024'
+      protocols:
+        description: 'Protocols for port scanning (comma-separated)'
+        required: false
+        default: 'tcp,udp'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # No runtime dependencies needed, but install dev dependencies for completeness
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Make script executable
+      run: chmod +x main.py
+      
+    - name: Validate inputs
+      run: |
+        echo "Scan mode: ${{ github.event.inputs.scan_mode }}"
+        echo "Target: ${{ github.event.inputs.target }}"
+        echo "Method: ${{ github.event.inputs.scan_method }}"
+        echo "Workers: ${{ github.event.inputs.workers }}"
+        echo "Format: ${{ github.event.inputs.output_format }}"
+        
+    - name: Run IP/Subnet Scan
+      if: github.event.inputs.scan_mode == 'ip' || github.event.inputs.scan_mode == 'subnet_ip'
+      run: |
+        # Determine if target is a subnet or IP range
+        TARGET="${{ github.event.inputs.target }}"
+        if [[ "$TARGET" == *"/"* ]]; then
+          # Subnet format
+          python main.py --subnet "$TARGET" \
+            --method "${{ github.event.inputs.scan_method }}" \
+            --workers "${{ github.event.inputs.workers }}" \
+            --format "${{ github.event.inputs.output_format }}" \
+            --output "scan_results_$(date +%Y%m%d_%H%M%S).${{ github.event.inputs.output_format }}" \
+            --verbose
+        else
+          # IP range format - split the target into start and end IP
+          START_IP=$(echo "$TARGET" | cut -d' ' -f1)
+          END_IP=$(echo "$TARGET" | cut -d' ' -f2)
+          python main.py --range "$START_IP" "$END_IP" \
+            --method "${{ github.event.inputs.scan_method }}" \
+            --workers "${{ github.event.inputs.workers }}" \
+            --format "${{ github.event.inputs.output_format }}" \
+            --output "scan_results_$(date +%Y%m%d_%H%M%S).${{ github.event.inputs.output_format }}" \
+            --verbose
+        fi
+        
+    - name: Run Tests (Optional)
+      run: |
+        python test_scanner.py
+        
+    - name: List output files
+      run: |
+        echo "Generated files:"
+        ls -la *.json *.txt *.csv 2>/dev/null || echo "No output files found"
+        ls -la output/ 2>/dev/null || echo "No output directory found"
+        
+    - name: Upload scan results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: rocon-scan-results-${{ github.run_number }}
+        path: |
+          *.json
+          *.txt
+          *.csv
+          output/
+        retention-days: 30
+        
+    - name: Display Results Summary
+      if: always()
+      run: |
+        echo "=== SCAN COMPLETED ==="
+        echo "Scan artifacts have been uploaded and will be available for download."
+        echo "Check the Actions tab to download the results."
+        echo "Results retention: 30 days"

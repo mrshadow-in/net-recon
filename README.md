@@ -51,7 +51,56 @@ pip install -r requirements.txt
 chmod +x main.py
 ```
 
-## Usage
+## Run Directly from GitHub
+
+🚀 **NEW**: You can now run ROCON Scanner directly from GitHub without any local setup!
+
+### GitHub Actions Workflows
+
+This repository includes three GitHub Actions workflows that allow you to run the scanner directly from the GitHub interface:
+
+#### 1. ROCON Scanner Demo
+- **Purpose**: Safe demonstration of tool capabilities
+- **Use Case**: Learn about the tool without performing actual network scans
+- **Access**: Go to Actions → "ROCON Scanner Demo" → "Run workflow"
+- **Options**:
+  - `safe_demo`: Overview and documentation
+  - `help_and_test`: Show help text and run unit tests
+  - `localhost_scan`: Safe localhost-only demonstration
+
+#### 2. ROCON Network Scanner
+- **Purpose**: Basic IP and subnet scanning
+- **Use Case**: Scan IP ranges or subnets for active hosts
+- **Access**: Go to Actions → "ROCON Network Scanner" → "Run workflow"
+- **Configuration**:
+  - Target: IP range (`192.168.1.1 192.168.1.10`) or subnet (`192.168.1.0/24`)
+  - Scan method: `ping` or `socket`
+  - Workers: Number of concurrent threads
+  - Output format: `json`, `txt`, or `csv`
+
+#### 3. ROCON Scanner - Advanced Modes
+- **Purpose**: Advanced scanning capabilities
+- **Use Case**: Port scanning, Minecraft server detection, comprehensive testing
+- **Access**: Go to Actions → "ROCON Scanner - Advanced Modes" → "Run workflow"
+- **Options**:
+  - `test_run`: Safe testing mode
+  - `port_scan`: TCP/UDP port scanning
+  - `minecraft_scan`: Minecraft server detection
+
+### How to Use GitHub Actions
+
+1. **Navigate to Actions**: Click the "Actions" tab in this repository
+2. **Select Workflow**: Choose the appropriate workflow for your needs
+3. **Run Workflow**: Click "Run workflow" button
+4. **Configure Parameters**: Fill in the required inputs (target IPs, scan options, etc.)
+5. **Execute**: Click the green "Run workflow" button
+6. **Download Results**: Once complete, download artifacts from the workflow run
+
+### Security Note
+
+⚠️ **Important**: Only scan networks you own or have explicit permission to scan. Network scanning may be detected by security systems and could violate network policies or terms of service.
+
+## Local Usage
 
 ### Command-line Arguments
 

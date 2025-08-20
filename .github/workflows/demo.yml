@@ -1,0 +1,262 @@
+name: ROCON Scanner Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      demo_mode:
+        description: 'Demo Mode'
+        required: true
+        default: 'safe_demo'
+        type: choice
+        options:
+          - safe_demo
+          - localhost_scan
+          - help_and_test
+      output_format:
+        description: 'Output Format'
+        required: false
+        default: 'json'
+        type: choice
+        options:
+          - json
+          - txt
+          - csv
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov
+        
+    - name: Safe Demo Mode
+      if: github.event.inputs.demo_mode == 'safe_demo'
+      run: |
+        echo "🚀 ROCON Scanner - Safe Demo Mode"
+        echo "=================================="
+        echo ""
+        echo "This demonstrates the ROCON Network Scanner capabilities safely."
+        echo ""
+        echo "📋 Tool Information:"
+        echo "- Network IP range and subnet scanning"
+        echo "- TCP/UDP port scanning" 
+        echo "- Minecraft server detection"
+        echo "- Multiple output formats (JSON, TXT, CSV)"
+        echo "- Concurrent scanning with configurable threads"
+        echo ""
+        echo "🔍 Supported Scan Methods:"
+        echo "- Ping: ICMP ping to detect active hosts"
+        echo "- Socket: TCP connection attempts"
+        echo ""
+        echo "📊 Output Options:"
+        echo "- JSON: Structured data for automation"
+        echo "- TXT: Human-readable reports"
+        echo "- CSV: Spreadsheet-compatible format"
+        echo ""
+        echo "⚙️ Usage Examples:"
+        echo "python main.py --subnet 192.168.1.0/24 --method ping"
+        echo "python main.py --range 10.0.0.1 10.0.0.50 --method socket"
+        echo ""
+        echo "🛡️ Security Note:"
+        echo "Only scan networks you own or have explicit permission to scan."
+        
+    - name: Show Help and Run Tests
+      if: github.event.inputs.demo_mode == 'help_and_test'
+      run: |
+        echo "📖 ROCON Scanner Help Documentation"
+        echo "==================================="
+        python main.py --help
+        echo ""
+        echo "🧪 Running Unit Tests"
+        echo "===================="
+        python test_scanner.py
+        
+    - name: Localhost Scan Demo
+      if: github.event.inputs.demo_mode == 'localhost_scan'
+      run: |
+        echo "🏠 Localhost Scan Demonstration"
+        echo "==============================="
+        echo ""
+        echo "Performing a safe scan of localhost (127.0.0.1) only."
+        echo "This demonstrates the tool without scanning external networks."
+        echo ""
+        
+        # Create a minimal localhost-only scan
+        timeout 30s python main.py --range 127.0.0.1 127.0.0.1 \
+          --method ping \
+          --workers 1 \
+          --format "${{ github.event.inputs.output_format }}" \
+          --output "localhost_demo.${{ github.event.inputs.output_format }}" \
+          --verbose || echo "Scan completed or timed out safely"
+          
+        echo ""
+        echo "📁 Generated Files:"
+        ls -la *.json *.txt *.csv 2>/dev/null || echo "No output files generated"
+        
+    - name: Create Documentation Artifacts
+      run: |
+        mkdir -p demo_output
+        
+        # Create usage guide
+        cat > demo_output/USAGE_GUIDE.md << 'EOF'
+        # ROCON Scanner Usage Guide
+        
+        ## Quick Start
+        
+        ### IP Range Scanning
+        ```bash
+        python main.py --range 192.168.1.1 192.168.1.254 --method ping
+        ```
+        
+        ### Subnet Scanning
+        ```bash
+        python main.py --subnet 192.168.1.0/24 --method socket
+        ```
+        
+        ### Interactive Mode
+        ```bash
+        python main.py
+        # Follow the interactive prompts for guided scanning
+        ```
+        
+        ## Scan Methods
+        
+        - **ping**: Uses ICMP ping (requires appropriate permissions)
+        - **socket**: Uses TCP socket connections (more reliable)
+        
+        ## Output Formats
+        
+        - **json**: Structured data for automation and scripting
+        - **txt**: Human-readable formatted output
+        - **csv**: Comma-separated values for spreadsheets
+        
+        ## Performance Tuning
+        
+        - Use `--workers N` to adjust concurrent scanning threads
+        - Higher worker counts = faster scanning (but more resource usage)
+        - Default: 50 workers
+        
+        ## Security Considerations
+        
+        ⚠️ **Important**: Only scan networks you own or have explicit permission to scan.
+        
+        - Network scanning may be detected by security systems
+        - Some networks may have policies against scanning
+        - Always obtain proper authorization before scanning
+        
+        ## Advanced Features
+        
+        ### Port Scanning
+        - Available in interactive mode
+        - Supports TCP and UDP protocols
+        - Configurable port ranges
+        
+        ### Minecraft Server Detection
+        - Specialized scanning for Minecraft servers
+        - Uses mcsrvstat.us API for detailed server information
+        - Available in interactive mode
+        
+        ## GitHub Action Usage
+        
+        This tool can be run directly from GitHub Actions:
+        
+        1. Go to the Actions tab in the repository
+        2. Select "ROCON Scanner Demo" workflow
+        3. Click "Run workflow"
+        4. Choose your demo mode and settings
+        5. Download results from the workflow artifacts
+        
+        For actual network scanning, use the advanced workflows with proper target configuration.
+        EOF
+        
+        # Create example outputs
+        cat > demo_output/example_output.json << 'EOF'
+        {
+          "scan_info": {
+            "timestamp": "2024-01-01T12:00:00.000Z",
+            "scan_type": "IP Scan",
+            "duration": 2.5,
+            "total_ips": 254,
+            "method": "ping",
+            "workers": 50
+          },
+          "active_ips": {
+            "count": 12,
+            "ips": [
+              "192.168.1.1",
+              "192.168.1.10",
+              "192.168.1.25",
+              "192.168.1.100"
+            ]
+          },
+          "inactive_ips": {
+            "count": 242,
+            "ips": ["..."]
+          }
+        }
+        EOF
+        
+        cat > demo_output/example_output.txt << 'EOF'
+        ROCON IP SCANNER - SCAN RESULTS
+        ================================================================================
+        Timestamp: 2024-01-01 12:00:00
+        Duration: 2.50 seconds
+        Scan Type: IP Scan
+        Method: ping
+        Workers: 50
+        ================================================================================
+        
+        ACTIVE IPs (12):
+        192.168.1.1             192.168.1.10            192.168.1.25            
+        192.168.1.100           
+        
+        INACTIVE IPs (242):
+        [Listed in full output...]
+        
+        ================================================================================
+        Results saved to: scan_results_20240101_120000.json
+        EOF
+        
+    - name: Upload Demo Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: rocon-demo-${{ github.run_number }}
+        path: |
+          demo_output/
+          localhost_demo.*
+          *.json
+          *.txt
+          *.csv
+        retention-days: 7
+        
+    - name: Demo Summary
+      if: always()
+      run: |
+        echo ""
+        echo "✅ ROCON Scanner Demo Complete!"
+        echo "==============================="
+        echo ""
+        echo "📦 Artifacts Generated:"
+        echo "- Usage guide and documentation"
+        echo "- Example output formats"
+        echo "- Demo scan results (if applicable)"
+        echo ""
+        echo "🔽 Next Steps:"
+        echo "1. Download artifacts from the Actions tab"
+        echo "2. Review the usage guide for detailed instructions"
+        echo "3. Set up the tool locally for your network scanning needs"
+        echo ""
+        echo "🌐 Repository: https://github.com/mrshadow-in/net-recon"
+        echo "📖 Full documentation available in README.md"
